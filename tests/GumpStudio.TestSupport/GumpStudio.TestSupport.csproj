@@ -5,4 +5,8 @@
     <Description>Shared helpers for the test projects: locating optional UO client data, and golden-file comparison.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+  </ItemGroup>
+
 </Project>

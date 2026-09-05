@@ -131,13 +131,4 @@ public sealed class LabelElement : Element
 
         visitor.Visit(this);
     }
-
-    /// <summary>
-    /// Applies a size measured by the renderer.
-    /// </summary>
-    /// <remarks>
-    /// A label is not user-resizable — its extent comes from the rendered text —
-    /// but the renderer must still be able to report what that extent is.
-    /// </remarks>
-    public void SetMeasuredSize(int width, int height) => SetInitialSize(width, height);
 }

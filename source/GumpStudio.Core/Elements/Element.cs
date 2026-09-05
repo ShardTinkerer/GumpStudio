@@ -157,6 +157,24 @@ public abstract class Element : INotifyPropertyChanged
     /// <summary>Sets the initial size for a newly created element.</summary>
     protected void SetInitialSize(int width, int height) => _size = new GumpSize(width, height);
 
+    /// <summary>
+    /// Sets a size measured from the element's content.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Size"/> deliberately ignores writes on a non-resizable element,
+    /// because the user must not be able to drag it to an arbitrary size. Its
+    /// extent still has to come from somewhere, though: an image is as big as its
+    /// art and a label as big as its rendered text. The renderer measures those
+    /// and reports them here.
+    /// </remarks>
+    public void SetContentSize(int width, int height)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(width);
+        ArgumentOutOfRangeException.ThrowIfNegative(height);
+
+        Set(ref _size, new GumpSize(width, height), nameof(Size));
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     protected void Set<T>(ref T field, T value, [System.Runtime.CompilerServices.CallerMemberName] string? property = null)

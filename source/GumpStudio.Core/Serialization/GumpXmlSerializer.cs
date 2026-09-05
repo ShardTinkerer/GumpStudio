@@ -224,9 +224,8 @@ public static class GumpXmlSerializer
         switch (element)
         {
             case GroupElement group:
-                node.SetAttributeValue("w", group.Width);
-                node.SetAttributeValue("h", group.Height);
-
+                // A group's size is derived from its children, so writing it
+                // would persist a value that is stale the moment anything moves.
                 foreach (Element child in group.Children)
                 {
                     node.Add(WriteElement(child));

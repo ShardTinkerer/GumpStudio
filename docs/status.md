@@ -119,12 +119,33 @@ Notes:
   member names and ordering match a real file, which were recovered by
   decompiling the shipped binary.
 
-## Phase 3 — `GumpStudio.Rendering` ⬜
+## Phase 3 — `GumpStudio.Rendering` ✅
 
-SkiaSharp renderer for all eleven element types, one art cache with eviction
-replacing eleven ad-hoc per-element bitmap fields, and the nine-slice
-`ResizePic` background rewritten from the format's semantics rather than
-transcribed from decompiled loop residue. Golden-image tests.
+Done. 15 tests in `GumpStudio.Rendering.Tests`; 268 across the solution.
+
+- `GumpRenderer` draws a page onto an `SKCanvas` and touches no UI type, so it
+  runs headless — which is what makes pixel assertions possible at all. The old
+  renderer lived inside the designer form.
+- `ElementPainter` is an `IElementVisitor`, so adding an element type breaks the
+  build rather than silently drawing nothing.
+- `UoArtSource` holds one bounded LRU cache, replacing the eleven unbounded
+  ad-hoc bitmap fields the old element classes each carried.
+- `NineSlice` implements resize-pic backgrounds from the format's semantics.
+  Corner images set the margins, edges tile along their axis, the centre tiles
+  both ways, and every band is clipped. It survives being dragged smaller than
+  its own borders, which the arithmetic in the original did not obviously do.
+- All art is drawn with nearest-neighbour sampling. Skia's default smooths, which
+  softens every edge of low-resolution pixel art.
+- Group rendering saves and restores the canvas around children, so a throwing
+  child cannot leave the transform shifted for everything after it.
+
+Rendering tests use a synthetic art source, so they run on CI with no client
+present. Determinism is asserted directly, which is the precondition for
+golden-image tests later.
+
+The CLI gained `render` and `sample`, making the whole stack demonstrable:
+`sample` writes a document, `render` loads it, resolves art from a real client
+and writes a PNG.
 
 ## Phase 4 — Avalonia shell ⬜
 
