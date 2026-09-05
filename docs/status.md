@@ -1,6 +1,6 @@
 # Status and roadmap
 
-Last updated at the end of Phase 1.
+Last updated at the end of Phase 4. Phases 0, 1, 2, 3 and 5 are complete.
 
 ## Why the rewrite exists
 
@@ -147,12 +147,41 @@ The CLI gained `render` and `sample`, making the whole stack demonstrable:
 `sample` writes a document, `render` loads it, resolves art from a real client
 and writes a PNG.
 
-## Phase 4 — Avalonia shell ⬜ next
+## Phase 4 — Avalonia shell ✅
 
-Canvas plus a testable `CanvasInteractionController` in Core, element tree,
-hand-rolled metadata-driven property panel with six custom editors (gump id,
-item id, hue, font, cliloc, large text), art/hue/cliloc browsers, page tabs,
-undo UI, save/load/import.
+Done. 300 tests across the solution; 133 pass and 17 skip with no client
+configured, so CI stays green.
+
+- `CanvasInteractionController` lives in **Core**, not the UI, so selection,
+  dragging, resizing, marquee and nudging are tested directly. In the original
+  this was roughly 500 lines of nested pointer handlers inside `DesignerForm`
+  that could only be exercised by driving a live window.
+- `GumpCanvas` is a thin Avalonia control: it converts events to gump
+  coordinates, renders through SkiaSharp into a `WriteableBitmap`, and does
+  nothing else.
+- The property panel is metadata-driven from `PropertyRow`. Every edit becomes a
+  `SetPropertyCommand`, so property changes are undoable and merge while typing.
+- Settings are JSON in the platform application-data folder, replacing
+  `ApplicationSettingsBase` and its unfindable hashed `user.config`.
+- Failures land in the status bar rather than a modal box from twenty-odd catch
+  blocks.
+- The POL exporter is discovered from `Plugins/` at startup rather than
+  referenced, so the plugin path is what actually ships.
+
+Verified by running the application against a 7.0.114.4 client: the canvas draws
+real art, the element list and property panel populate, and a document opens from
+the command line.
+
+**Not built.** These were in the original plan for this phase and are not done:
+
+- Dedicated art, hue and cliloc browser dialogs. Gump ids, item ids and hues are
+  typed as numbers (decimal or `0x`-prefixed) rather than picked from a visual
+  grid. The data layer already exposes everything a browser needs.
+- Clipboard cut/copy/paste.
+- A plugin manager UI for enabling and ordering plugins; discovery currently
+  loads everything it finds.
+- Element reordering and grouping from the element list — grouping is on the Edit
+  menu only.
 
 ## Phase 5 — Plugins and the POL exporter ✅
 

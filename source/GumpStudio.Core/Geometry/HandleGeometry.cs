@@ -6,6 +6,10 @@ namespace GumpStudio.Core.Geometry;
 public enum DragMode
 {
     None,
+
+    /// <summary>Dragging a selection rectangle over empty canvas.</summary>
+    SelectionMarquee,
+
     Move,
     ResizeLeft,
     ResizeTop,
@@ -167,8 +171,18 @@ public static class HandleGeometry
         return new GumpRect(left, top, right - left, bottom - top);
     }
 
-    /// <summary>True when the drag resizes rather than moves.</summary>
-    public static bool IsResize(DragMode mode) => mode is not (DragMode.None or DragMode.Move);
+    /// <summary>True when the drag resizes rather than moves or selects.</summary>
+    /// <remarks>Listed explicitly: an "everything except None and Move" test
+    /// silently started including the marquee mode when it was added.</remarks>
+    public static bool IsResize(DragMode mode) =>
+        mode is DragMode.ResizeLeft
+            or DragMode.ResizeTop
+            or DragMode.ResizeRight
+            or DragMode.ResizeBottom
+            or DragMode.ResizeTopLeft
+            or DragMode.ResizeTopRight
+            or DragMode.ResizeBottomLeft
+            or DragMode.ResizeBottomRight;
 
     private static bool MovesLeftEdge(DragMode handle) =>
         handle is DragMode.ResizeLeft or DragMode.ResizeTopLeft or DragMode.ResizeBottomLeft;

@@ -1,11 +1,91 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:GumpStudio.App.Controls"
         x:Class="GumpStudio.App.MainWindow"
         Title="GumpStudio"
-        Width="1024" Height="768">
+        Width="1280" Height="860"
+        MinWidth="900" MinHeight="600">
 
-  <TextBlock Margin="24"
-             TextWrapping="Wrap"
-             Text="GumpStudio 2.0 — shell placeholder. The designer surface lands in Phase 4." />
+  <DockPanel>
 
+    <Menu DockPanel.Dock="Top" Name="MainMenu">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New" Name="MenuNew" InputGesture="Ctrl+N" />
+        <MenuItem Header="_Open…" Name="MenuOpen" InputGesture="Ctrl+O" />
+        <MenuItem Header="_Save" Name="MenuSave" InputGesture="Ctrl+S" />
+        <MenuItem Header="Save _As…" Name="MenuSaveAs" />
+        <Separator />
+        <MenuItem Header="_Import GumpStudio 1.8 file…" Name="MenuImportLegacy" />
+        <MenuItem Header="_Export" Name="MenuExport" />
+        <Separator />
+        <MenuItem Header="Set _client folder…" Name="MenuSetClient" />
+        <Separator />
+        <MenuItem Header="E_xit" Name="MenuExit" />
+      </MenuItem>
+
+      <MenuItem Header="_Edit">
+        <MenuItem Header="_Undo" Name="MenuUndo" InputGesture="Ctrl+Z" />
+        <MenuItem Header="_Redo" Name="MenuRedo" InputGesture="Ctrl+Y" />
+        <Separator />
+        <MenuItem Header="Select _all" Name="MenuSelectAll" InputGesture="Ctrl+A" />
+        <MenuItem Header="_Delete" Name="MenuDelete" InputGesture="Delete" />
+        <MenuItem Header="_Group selection" Name="MenuGroup" InputGesture="Ctrl+G" />
+      </MenuItem>
+
+      <MenuItem Header="_Page">
+        <MenuItem Header="_Add page" Name="MenuAddPage" />
+        <MenuItem Header="_Remove page" Name="MenuRemovePage" />
+      </MenuItem>
+
+      <MenuItem Header="_Plugins" Name="MenuPlugins" />
+    </Menu>
+
+    <Border DockPanel.Dock="Bottom" Background="#1F1F23" Padding="8,4">
+      <TextBlock Name="StatusText" Foreground="#C8C8C8" Text="Ready." />
+    </Border>
+
+    <!-- Toolbox -->
+    <Border DockPanel.Dock="Left" Width="150" Background="#26262A" Padding="6">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="Toolbox" Foreground="#9A9AA0"
+                   FontWeight="Bold" Margin="2,2,2,6" />
+        <ItemsControl Name="Toolbox">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Spacing="3" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </DockPanel>
+    </Border>
+
+    <!-- Element tree and properties -->
+    <Border DockPanel.Dock="Right" Width="300" Background="#26262A" Padding="6">
+      <Grid RowDefinitions="Auto,2*,Auto,3*">
+        <TextBlock Grid.Row="0" Text="Elements" Foreground="#9A9AA0"
+                   FontWeight="Bold" Margin="2,2,2,6" />
+
+        <ListBox Grid.Row="1" Name="ElementList" Background="#1F1F23" />
+
+        <TextBlock Grid.Row="2" Text="Properties" Foreground="#9A9AA0"
+                   FontWeight="Bold" Margin="2,10,2,6" />
+
+        <ScrollViewer Grid.Row="3">
+          <StackPanel Name="PropertyPanel" Spacing="4" />
+        </ScrollViewer>
+      </Grid>
+    </Border>
+
+    <!-- Pages + canvas -->
+    <DockPanel>
+      <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="PageTabs"
+                  Background="#26262A" Spacing="2" />
+
+      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+        <controls:GumpCanvas Name="Canvas" Width="1024" Height="768"
+                             HorizontalAlignment="Left" VerticalAlignment="Top" />
+      </ScrollViewer>
+    </DockPanel>
+
+  </DockPanel>
 </Window>

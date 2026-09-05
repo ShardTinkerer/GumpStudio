@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../source/GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj" />
+    <ProjectReference Include="../../source/GumpStudio.Plugins.Abstractions/GumpStudio.Plugins.Abstractions.csproj" />
     <ProjectReference Include="../GumpStudio.TestSupport/GumpStudio.TestSupport.csproj" />
   </ItemGroup>
 
