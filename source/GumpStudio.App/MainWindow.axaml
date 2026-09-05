@@ -1,0 +1,11 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.MainWindow"
+        Title="GumpStudio"
+        Width="1024" Height="768">
+
+  <TextBlock Margin="24"
+             TextWrapping="Wrap"
+             Text="GumpStudio 2.0 — shell placeholder. The designer surface lands in Phase 4." />
+
+</Window>

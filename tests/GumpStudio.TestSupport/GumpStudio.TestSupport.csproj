@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <Description>Shared helpers for the test projects: locating optional UO client data, and golden-file comparison.</Description>
+  </PropertyGroup>
+
+</Project>

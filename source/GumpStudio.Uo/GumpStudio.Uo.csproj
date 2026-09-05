@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Ultima Online client data access: .mul and .uop containers, art, gumps, hues, tiledata, cliloc and fonts. No UI or imaging framework dependency.</Description>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+</Project>

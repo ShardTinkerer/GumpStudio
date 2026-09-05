@@ -1,0 +1,59 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CI: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore GumpStudio.slnx
+
+      - name: Build
+        run: dotnet build GumpStudio.slnx --configuration Release --no-restore
+
+      # Tests needing real UO client data read GUMPSTUDIO_TEST_CLIENT and skip
+      # when it is unset, which is always the case on CI. Everything else runs
+      # against checked-in synthetic fixtures.
+      #
+      # xunit.v3 runs on Microsoft.Testing.Platform (opted into via global.json),
+      # so these are MTP flags, not the old VSTest ones.
+      - name: Test
+        run: >
+          dotnet test GumpStudio.slnx
+          --configuration Release
+          --no-build
+          --report-trx
+          --coverage
+          --results-directory ./artifacts/test-results
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: ./artifacts/test-results

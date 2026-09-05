@@ -1,0 +1,26 @@
+# Rules the rewrite exists to enforce. Format: <documentation ID>;<message>
+# See https://github.com/dotnet/roslyn-analyzers/blob/main/src/Microsoft.CodeAnalysis.BannedApiAnalyzers/BannedApiAnalyzers.Help.md
+
+# --- System.Drawing: the whole data/render stack is span + SkiaSharp now. ---
+T:System.Drawing.Bitmap; Use GumpStudio.Uo.UoImage (data layer) or SKBitmap (rendering layer).
+T:System.Drawing.Graphics; Rendering goes through SKCanvas in GumpStudio.Rendering.
+T:System.Drawing.Image; Use GumpStudio.Uo.UoImage or SKImage.
+T:System.Drawing.Color; Use GumpStudio.Core.Primitives.Argb32 or SKColor.
+T:System.Drawing.Point; Use GumpStudio.Core.Primitives.GumpPoint.
+T:System.Drawing.Size; Use GumpStudio.Core.Primitives.GumpSize.
+T:System.Drawing.Rectangle; Use GumpStudio.Core.Primitives.GumpRect.
+T:System.Drawing.SolidBrush; Use SKPaint.
+T:System.Drawing.Pen; Use SKPaint.
+
+# --- BinaryFormatter: removed from the runtime, and the reason the old
+#     file format had to be replaced. Reading legacy files goes through
+#     System.Formats.Nrbf instead, which never activates a type. ---
+T:System.Runtime.Serialization.Formatters.Binary.BinaryFormatter; Legacy .gump files are read with System.Formats.Nrbf. New files are XML.
+
+# --- Culture-sensitive APIs. Exporter output and file formats must be
+#     byte-stable regardless of the user's locale. ---
+M:System.Int32.Parse(System.String); Pass CultureInfo.InvariantCulture.
+M:System.Int32.TryParse(System.String,System.Int32@); Use the overload taking NumberStyles and IFormatProvider.
+M:System.Double.Parse(System.String); Pass CultureInfo.InvariantCulture.
+M:System.String.ToLower; Use ToLowerInvariant().
+M:System.String.ToUpper; Use ToUpperInvariant().

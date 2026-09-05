@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Description>Avalonia desktop shell for GumpStudio.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Views are XAML; the generated partials do not carry doc comments. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GumpStudio.Core/GumpStudio.Core.csproj" />
+    <ProjectReference Include="../GumpStudio.Rendering/GumpStudio.Rendering.csproj" />
+    <ProjectReference Include="../GumpStudio.Plugins.Abstractions/GumpStudio.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+
+  <!--
+    Plugin deployment. The old solution had no step like this at all, so a fresh
+    build produced an app with an empty Plugins folder and zero plugins loaded.
+    Plugins are built but deliberately NOT referenced for compilation: the host
+    discovers them on disk through an AssemblyLoadContext.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false"
+                      OutputItemType="PluginBuildOutput" />
+  </ItemGroup>
+
+  <Target Name="CopyPluginsToOutput" AfterTargets="Build">
+    <Copy SourceFiles="@(PluginBuildOutput)"
+          DestinationFolder="$(OutDir)Plugins"
+          SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Deployed plugin: %(PluginBuildOutput.Filename)%(PluginBuildOutput.Extension)" />
+  </Target>
+
+</Project>

@@ -1,0 +1,33 @@
+<Solution>
+
+  <Folder Name="/source/">
+    <Project Path="source/GumpStudio.Uo/GumpStudio.Uo.csproj" />
+    <Project Path="source/GumpStudio.Core/GumpStudio.Core.csproj" />
+    <Project Path="source/GumpStudio.Rendering/GumpStudio.Rendering.csproj" />
+    <Project Path="source/GumpStudio.Plugins.Abstractions/GumpStudio.Plugins.Abstractions.csproj" />
+    <Project Path="source/GumpStudio.App/GumpStudio.App.csproj" />
+    <Project Path="source/GumpStudio.Cli/GumpStudio.Cli.csproj" />
+  </Folder>
+
+  <Folder Name="/source/plugins/">
+    <Project Path="source/GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj" />
+  </Folder>
+
+  <Folder Name="/tests/">
+    <Project Path="tests/GumpStudio.TestSupport/GumpStudio.TestSupport.csproj" />
+    <Project Path="tests/GumpStudio.Uo.Tests/GumpStudio.Uo.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Core.Tests/GumpStudio.Core.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Rendering.Tests/GumpStudio.Rendering.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Plugins.Pol.Tests/GumpStudio.Plugins.Pol.Tests.csproj" />
+  </Folder>
+
+  <Folder Name="/solution items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="BannedSymbols.txt" />
+    <File Path=".editorconfig" />
+    <File Path="global.json" />
+    <File Path="README.md" />
+  </Folder>
+
+</Solution>
