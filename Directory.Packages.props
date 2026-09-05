@@ -18,6 +18,13 @@
     <PackageVersion Include="SkiaSharp" Version="4.151.2" />
   </ItemGroup>
 
+  <ItemGroup Label="Runtime">
+    <!-- Reads the legacy BinaryFormatter payloads in 1.8-era .gump files without
+         activating any type. Only shipped in the WindowsDesktop shared framework,
+         so the package keeps GumpStudio.Core cross-platform. -->
+    <PackageVersion Include="System.Formats.Nrbf" Version="10.0.11" />
+  </ItemGroup>
+
   <ItemGroup Label="Analyzers">
     <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
   </ItemGroup>

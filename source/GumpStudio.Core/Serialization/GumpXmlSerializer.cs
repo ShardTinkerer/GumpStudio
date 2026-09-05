@@ -1,0 +1,461 @@
+using System.Globalization;
+using System.Xml;
+using System.Xml.Linq;
+
+using GumpStudio.Core.Document;
+using GumpStudio.Core.Elements;
+using GumpStudio.Core.Primitives;
+
+namespace GumpStudio.Core.Serialization;
+
+/// <summary>
+/// Reads and writes the <c>.gump</c> document format.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Hand-written XML over an explicit element-name mapping, deliberately not
+/// <c>XmlSerializer</c> reflecting over the live classes. The old format was
+/// <c>BinaryFormatter</c>, which bound the file to CLR type identity — renaming a
+/// class broke every saved document, and the format could not be read at all on
+/// modern .NET.
+/// </para>
+/// <para>
+/// Unknown elements and attributes are preserved in spirit by being ignored
+/// rather than fatal, so a file written by a newer build still opens.
+/// </para>
+/// </remarks>
+public static class GumpXmlSerializer
+{
+    /// <summary>Format version written to new files.</summary>
+    public const int CurrentVersion = 3;
+
+    private const string RootName = "gump";
+
+    /// <summary>Maps the stable on-disk type name to a factory.</summary>
+    private static readonly Dictionary<string, Func<Element>> Factories =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Group"] = () => new GroupElement(),
+            ["Alpha"] = () => new AlphaElement(),
+            ["Background"] = () => new BackgroundElement(),
+            ["Button"] = () => new ButtonElement(),
+            ["Checkbox"] = () => new CheckboxElement(),
+            ["Radio"] = () => new RadioElement(),
+            ["Html"] = () => new HtmlElement(),
+            ["Image"] = () => new ImageElement(),
+            ["Item"] = () => new ItemElement(),
+            ["Label"] = () => new LabelElement(),
+            ["TextEntry"] = () => new TextEntryElement(),
+            ["Tiled"] = () => new TiledElement(),
+        };
+
+    public static void Save(GumpDocument document, string path)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(path);
+
+        XmlWriterSettings settings = new()
+        {
+            Indent = true,
+            IndentChars = "  ",
+            Encoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+        };
+
+        using XmlWriter writer = XmlWriter.Create(path, settings);
+
+        ToXml(document).WriteTo(writer);
+    }
+
+    public static GumpDocument Load(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        // DTD processing off and no resolver: a document file is untrusted input.
+        XmlReaderSettings settings = new()
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null,
+            IgnoreWhitespace = true,
+            IgnoreComments = true,
+        };
+
+        using XmlReader reader = XmlReader.Create(path, settings);
+
+        return FromXml(XDocument.Load(reader));
+    }
+
+    /// <summary>Serialises to an in-memory document, for tests and round-tripping.</summary>
+    public static XDocument ToXml(GumpDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        XElement root = new(
+            RootName,
+            new XAttribute("version", CurrentVersion),
+            WriteProperties(document.Properties));
+
+        foreach (GumpPage page in document.Pages)
+        {
+            XElement pageElement = new("page");
+
+            if (!string.IsNullOrEmpty(page.Name))
+            {
+                pageElement.SetAttributeValue("name", page.Name);
+            }
+
+            foreach (Element child in page.Root.Children)
+            {
+                pageElement.Add(WriteElement(child));
+            }
+
+            root.Add(pageElement);
+        }
+
+        return new XDocument(root);
+    }
+
+    /// <summary>Deserialises from an in-memory document.</summary>
+    public static GumpDocument FromXml(XDocument xml)
+    {
+        ArgumentNullException.ThrowIfNull(xml);
+
+        XElement root = xml.Root
+            ?? throw new InvalidDataException("The document is empty.");
+
+        if (!string.Equals(root.Name.LocalName, RootName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"Expected a <{RootName}> root element but found <{root.Name.LocalName}>.");
+        }
+
+        int version = ReadInt(root, "version", CurrentVersion);
+
+        if (version > CurrentVersion)
+        {
+            throw new InvalidDataException(
+                $"This file was written by a newer version of GumpStudio (format {version}; "
+                + $"this build understands up to {CurrentVersion}).");
+        }
+
+        GumpDocument document = new();
+
+        // The constructor seeds one page; the file supplies the real set.
+        List<GumpPage> pages = [];
+
+        if (root.Element("properties") is { } properties)
+        {
+            document.Properties = ReadProperties(properties);
+        }
+
+        foreach (XElement pageElement in root.Elements("page"))
+        {
+            GumpPage page = new((string?)pageElement.Attribute("name"));
+
+            foreach (XElement child in pageElement.Elements())
+            {
+                if (ReadElement(child) is { } element)
+                {
+                    page.Root.Add(element);
+                }
+            }
+
+            pages.Add(page);
+        }
+
+        if (pages.Count == 0)
+        {
+            pages.Add(new GumpPage("Page 0"));
+        }
+
+        document.ReplacePages(pages);
+
+        return document;
+    }
+
+    private static XElement WriteProperties(GumpProperties properties) =>
+        new(
+            "properties",
+            new XAttribute("x", properties.Location.X),
+            new XAttribute("y", properties.Location.Y),
+            new XAttribute("movable", properties.Movable),
+            new XAttribute("closable", properties.Closable),
+            new XAttribute("disposable", properties.Disposable),
+            new XAttribute("typeId", properties.TypeId));
+
+    private static GumpProperties ReadProperties(XElement element) => new()
+    {
+        Location = new GumpPoint(ReadInt(element, "x", 0), ReadInt(element, "y", 0)),
+        Movable = ReadBool(element, "movable", true),
+        Closable = ReadBool(element, "closable", true),
+        Disposable = ReadBool(element, "disposable", true),
+        TypeId = ReadInt(element, "typeId", 0),
+    };
+
+    private static XElement WriteElement(Element element)
+    {
+        XElement node = new(element.TypeName.ToLowerInvariant());
+
+        if (!string.IsNullOrEmpty(element.Name))
+        {
+            node.SetAttributeValue("name", element.Name);
+        }
+
+        node.SetAttributeValue("x", element.X);
+        node.SetAttributeValue("y", element.Y);
+
+        if (element.IsResizable)
+        {
+            node.SetAttributeValue("w", element.Width);
+            node.SetAttributeValue("h", element.Height);
+        }
+
+        if (!string.IsNullOrEmpty(element.Comment))
+        {
+            node.SetAttributeValue("comment", element.Comment);
+        }
+
+        WriteSpecific(element, node);
+
+        return node;
+    }
+
+    private static void WriteSpecific(Element element, XElement node)
+    {
+        switch (element)
+        {
+            case GroupElement group:
+                node.SetAttributeValue("w", group.Width);
+                node.SetAttributeValue("h", group.Height);
+
+                foreach (Element child in group.Children)
+                {
+                    node.Add(WriteElement(child));
+                }
+
+                break;
+
+            case AlphaElement:
+                break;
+
+            case BackgroundElement background:
+                node.SetAttributeValue("gumpId", background.GumpId);
+                break;
+
+            case TiledElement tiled:
+                node.SetAttributeValue("gumpId", tiled.GumpId);
+                node.SetAttributeValue("hue", tiled.Hue);
+                break;
+
+            case ImageElement image:
+                node.SetAttributeValue("gumpId", image.GumpId);
+                node.SetAttributeValue("hue", image.Hue);
+                break;
+
+            case ItemElement item:
+                node.SetAttributeValue("itemId", item.ItemId);
+                node.SetAttributeValue("hue", item.Hue);
+                break;
+
+            case ButtonElement button:
+                node.SetAttributeValue("normalId", button.NormalId);
+                node.SetAttributeValue("pressedId", button.PressedId);
+                node.SetAttributeValue("kind", button.Kind);
+                node.SetAttributeValue("param", button.Param);
+
+                if (!string.IsNullOrEmpty(button.CodeBehind))
+                {
+                    node.Add(new XElement("codeBehind", button.CodeBehind));
+                }
+
+                break;
+
+            // Radio must precede Checkbox: it derives from it.
+            case RadioElement radio:
+                WriteCheckbox(radio, node);
+                node.SetAttributeValue("value", radio.Value);
+                break;
+
+            case CheckboxElement checkbox:
+                WriteCheckbox(checkbox, node);
+                break;
+
+            case HtmlElement html:
+                node.SetAttributeValue("kind", html.ContentKind);
+                node.SetAttributeValue("clilocId", html.ClilocId);
+                node.SetAttributeValue("scrollbar", html.ShowScrollbar);
+                node.SetAttributeValue("background", html.ShowBackground);
+
+                if (!string.IsNullOrEmpty(html.Html))
+                {
+                    node.Add(new XElement("html", html.Html));
+                }
+
+                break;
+
+            case LabelElement label:
+                node.SetAttributeValue("hue", label.Hue);
+                node.SetAttributeValue("font", label.FontIndex);
+                node.SetAttributeValue("cropped", label.Cropped);
+                node.Add(new XElement("text", label.Text));
+                break;
+
+            case TextEntryElement entry:
+                node.SetAttributeValue("hue", entry.Hue);
+                node.SetAttributeValue("entryId", entry.EntryId);
+                node.SetAttributeValue("maxLength", entry.MaxLength);
+
+                if (!string.IsNullOrEmpty(entry.InitialText))
+                {
+                    node.Add(new XElement("text", entry.InitialText));
+                }
+
+                break;
+
+            default:
+                throw new NotSupportedException($"No serializer for element type '{element.TypeName}'.");
+        }
+    }
+
+    private static void WriteCheckbox(CheckboxElement checkbox, XElement node)
+    {
+        node.SetAttributeValue("checkedId", checkbox.CheckedId);
+        node.SetAttributeValue("uncheckedId", checkbox.UncheckedId);
+        node.SetAttributeValue("checked", checkbox.IsChecked);
+        node.SetAttributeValue("groupId", checkbox.GroupId);
+    }
+
+    private static Element? ReadElement(XElement node)
+    {
+        // An unrecognised element is skipped rather than fatal, so a document
+        // written by a newer build still opens.
+        if (!Factories.TryGetValue(node.Name.LocalName, out Func<Element>? factory))
+        {
+            return null;
+        }
+
+        Element element = factory();
+
+        element.Name = (string?)node.Attribute("name") ?? element.TypeName;
+        element.Comment = (string?)node.Attribute("comment") ?? string.Empty;
+        element.Location = new GumpPoint(ReadInt(node, "x", 0), ReadInt(node, "y", 0));
+
+        if (element.IsResizable)
+        {
+            element.Size = new GumpSize(ReadInt(node, "w", 1), ReadInt(node, "h", 1));
+        }
+
+        ReadSpecific(element, node);
+
+        return element;
+    }
+
+    private static void ReadSpecific(Element element, XElement node)
+    {
+        switch (element)
+        {
+            case GroupElement group:
+                foreach (XElement child in node.Elements())
+                {
+                    if (ReadElement(child) is { } nested)
+                    {
+                        group.Add(nested);
+                    }
+                }
+
+                break;
+
+            case AlphaElement:
+                break;
+
+            case BackgroundElement background:
+                background.GumpId = ReadInt(node, "gumpId", background.GumpId);
+                break;
+
+            case TiledElement tiled:
+                tiled.GumpId = ReadInt(node, "gumpId", tiled.GumpId);
+                tiled.Hue = ReadInt(node, "hue", 0);
+                break;
+
+            case ImageElement image:
+                image.GumpId = ReadInt(node, "gumpId", image.GumpId);
+                image.Hue = ReadInt(node, "hue", 0);
+                break;
+
+            case ItemElement item:
+                item.ItemId = ReadInt(node, "itemId", item.ItemId);
+                item.Hue = ReadInt(node, "hue", 0);
+                break;
+
+            case ButtonElement button:
+                button.NormalId = ReadInt(node, "normalId", button.NormalId);
+                button.PressedId = ReadInt(node, "pressedId", button.PressedId);
+                button.Kind = ReadEnum(node, "kind", ButtonKind.Reply);
+                button.Param = ReadInt(node, "param", 0);
+                button.CodeBehind = (string?)node.Element("codeBehind") ?? string.Empty;
+                break;
+
+            case RadioElement radio:
+                ReadCheckbox(radio, node);
+                radio.Value = ReadInt(node, "value", 0);
+                break;
+
+            case CheckboxElement checkbox:
+                ReadCheckbox(checkbox, node);
+                break;
+
+            case HtmlElement html:
+                html.ContentKind = ReadEnum(node, "kind", HtmlContentKind.Html);
+                html.ClilocId = ReadInt(node, "clilocId", html.ClilocId);
+                html.ShowScrollbar = ReadBool(node, "scrollbar", false);
+                html.ShowBackground = ReadBool(node, "background", false);
+                html.Html = (string?)node.Element("html") ?? string.Empty;
+                break;
+
+            case LabelElement label:
+                label.Hue = ReadInt(node, "hue", 0);
+                label.FontIndex = ReadInt(node, "font", 0);
+                label.Cropped = ReadBool(node, "cropped", false);
+                label.Text = (string?)node.Element("text") ?? string.Empty;
+                break;
+
+            case TextEntryElement entry:
+                entry.Hue = ReadInt(node, "hue", 0);
+                entry.EntryId = ReadInt(node, "entryId", 0);
+                entry.MaxLength = ReadInt(node, "maxLength", 0);
+                entry.InitialText = (string?)node.Element("text") ?? string.Empty;
+                break;
+
+            default:
+                throw new NotSupportedException($"No deserializer for element type '{element.TypeName}'.");
+        }
+    }
+
+    private static void ReadCheckbox(CheckboxElement checkbox, XElement node)
+    {
+        checkbox.CheckedId = ReadInt(node, "checkedId", checkbox.CheckedId);
+        checkbox.UncheckedId = ReadInt(node, "uncheckedId", checkbox.UncheckedId);
+        checkbox.GroupId = ReadInt(node, "groupId", 0);
+
+        // Set last: a radio's setter clears its siblings, so the group must be
+        // known first.
+        checkbox.IsChecked = ReadBool(node, "checked", false);
+    }
+
+    private static int ReadInt(XElement node, string name, int fallback) =>
+        node.Attribute(name) is { } attribute
+        && int.TryParse(attribute.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
+            ? value
+            : fallback;
+
+    private static bool ReadBool(XElement node, string name, bool fallback) =>
+        node.Attribute(name) is { } attribute && bool.TryParse(attribute.Value, out bool value)
+            ? value
+            : fallback;
+
+    private static TEnum ReadEnum<TEnum>(XElement node, string name, TEnum fallback)
+        where TEnum : struct, Enum =>
+        node.Attribute(name) is { } attribute
+        && Enum.TryParse(attribute.Value, ignoreCase: true, out TEnum value)
+            ? value
+            : fallback;
+}

@@ -88,21 +88,36 @@ headline findings:
 Proof the pipeline is correct end to end: gump 5 dumped from a MUL client and
 from a UOP client produces **byte-identical PNGs**.
 
-## Phase 2 — `GumpStudio.Core` document model ⬜ next
+## Phase 2 — `GumpStudio.Core` document model ✅
+
+Done. 54 tests in `GumpStudio.Core.Tests`; 254 across the solution.
 
 - `GumpDocument` / `GumpPage` / `Element` hierarchy replacing the untyped
-  `ArrayList Stacks`.
-- One `HandleGeometry` helper for resize handles and hit testing, replacing two
-  divergent sets of magic numbers and a 260-line eight-case resize switch.
-- `Element.GetAbsolutePosition()` as the *only* way position is read — see the
-  nested-group defect below.
-- **Command-based undo** (`IUndoableCommand` with merge support) replacing
-  whole-document deep-clone snapshots taken at 30+ call sites.
-- **XML serialization** over an explicit DTO layer, so renaming a class never
-  breaks a saved file.
+  `ArrayList Stacks`. Elements are data-only: no rendering, no context menus, no
+  reaching back into a global form reference.
+- `HandleGeometry` is the single source of truth for handle placement, hit
+  testing and resizing — replacing two divergent sets of magic numbers plus a
+  260-line eight-case switch with one anchor-relative function.
+- `Element.GetAbsolutePosition()` is the only way position is read.
+- **Command-based undo** with merge support, so a drag or a run of arrow-key
+  nudges is one entry. `Undo`/`Redo` are safe at both ends of the history rather
+  than relying on menu state.
+- **XML serialization** over an explicit name mapping. Type names on disk are
+  stable `TypeName` values, so renaming a class cannot break a saved file;
+  unknown element types are skipped rather than fatal.
 - **Legacy importer** using `System.Formats.Nrbf`, which decodes the old
-  `BinaryFormatter` payloads without ever activating a type. The record layout
-  is recovered and documented in [uo-file-formats.md](uo-file-formats.md).
+  `BinaryFormatter` payloads without ever activating a type.
+
+Notes:
+
+- `System.Formats.Nrbf` ships only in the WindowsDesktop shared framework, so
+  the cross-platform NuGet package is referenced to keep Core platform-neutral.
+- No real 1.8 `.gump` file could be found anywhere on the machine, so
+  `NrbfFixtureWriter` in the test-support project writes MS-NRBF payloads
+  directly. The importer is therefore tested against genuine NRBF bytes decoded
+  by the framework's own decoder — what remains unverified is only whether the
+  member names and ordering match a real file, which were recovered by
+  decompiling the shipped binary.
 
 ## Phase 3 — `GumpStudio.Rendering` ⬜
 
