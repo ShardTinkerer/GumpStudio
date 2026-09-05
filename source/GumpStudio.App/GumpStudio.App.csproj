@@ -45,4 +45,17 @@
     <Message Importance="high" Text="Deployed plugin: %(PluginBuildOutput.Filename)%(PluginBuildOutput.Extension)" />
   </Target>
 
+  <!--
+    Publish needs its own copy step: the build-time target writes to $(OutDir),
+    which is not the publish directory. Without this a published application
+    ships with an empty Plugins folder and no exporters — the same gap the old
+    solution had.
+  -->
+  <Target Name="CopyPluginsToPublish" AfterTargets="Publish">
+    <Copy SourceFiles="@(PluginBuildOutput)"
+          DestinationFolder="$(PublishDir)Plugins"
+          SkipUnchangedFiles="true" />
+    <Message Importance="high" Text="Published plugin: %(PluginBuildOutput.Filename)%(PluginBuildOutput.Extension)" />
+  </Target>
+
 </Project>

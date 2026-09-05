@@ -222,9 +222,27 @@ API that no longer exists in that shape; the equivalent extension points
 (`ICanvasLayer`, `IPointerInputFilter`) are named in the contract but are not
 implemented until the shell exists to host them.
 
-## Phase 6 — Cleanup ⬜
+## Phase 6 — Cleanup ◐ partly done
 
-Delete `src/`, rewrite the top-level `README.md`, publish self-contained builds.
+- ✅ Top-level `README.md` rewritten.
+- ✅ Self-contained publishing verified for `win-x64` and `linux-x64`, including
+  plugin deployment. Publishing needed its own copy target: the build-time one
+  writes to `$(OutDir)`, which is not the publish directory, so a published
+  application shipped with an empty `Plugins` folder — the same gap the old
+  solution had, reintroduced one layer down.
+
+  ```sh
+  dotnet publish source/GumpStudio.App -c Release -r win-x64   --self-contained
+  dotnet publish source/GumpStudio.App -c Release -r linux-x64 --self-contained
+  ```
+
+- ⬜ **`src/` is deliberately still here.** The plan made deleting it conditional
+  on reaching parity, and parity is not reached: the art, hue and cliloc
+  browsers, the clipboard and the plugin manager are not built, and `src/` is
+  the reference for all of them. Deleting it now would throw away the only
+  description of behaviour that has not been ported yet. It should go once the
+  gaps below are closed.
+- ⬜ No release tagged.
 
 ---
 

@@ -24,6 +24,17 @@ dotnet run --project source/GumpStudio.Cli -- info --client "C:/path/to/UO"
 dotnet run --project source/GumpStudio.Cli -- dump --client "C:/path/to/UO" --gump 5 --out gump5.png
 ```
 
+## Publishing
+
+```sh
+dotnet publish source/GumpStudio.App -c Release -r win-x64   --self-contained
+dotnet publish source/GumpStudio.App -c Release -r linux-x64 --self-contained
+dotnet publish source/GumpStudio.App -c Release -r osx-arm64 --self-contained
+```
+
+Plugins are copied into a `Plugins` folder beside the executable by a publish
+target; the host discovers them there at startup.
+
 ## Repository layout
 
 ```
