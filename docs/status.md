@@ -147,18 +147,51 @@ The CLI gained `render` and `sample`, making the whole stack demonstrable:
 `sample` writes a document, `render` loads it, resolves art from a real client
 and writes a PNG.
 
-## Phase 4 — Avalonia shell ⬜
+## Phase 4 — Avalonia shell ⬜ next
 
 Canvas plus a testable `CanvasInteractionController` in Core, element tree,
 hand-rolled metadata-driven property panel with six custom editors (gump id,
 item id, hue, font, cliloc, large text), art/hue/cliloc browsers, page tabs,
 undo UI, save/load/import.
 
-## Phase 5 — Plugins ⬜
+## Phase 5 — Plugins and the POL exporter ✅
 
-`Plugins.Abstractions` with a UI-agnostic contract, a collectible
-`AssemblyLoadContext` host so plugins can actually be unloaded, then the POL
-exporter, SnapToGrid and WallPaper.
+Done ahead of Phase 4, because the plugin contract is UI-agnostic by design and
+therefore does not need the shell. Doing it first means the shell can wire up a
+real exporter rather than a stub. 14 tests in `GumpStudio.Plugins.Pol.Tests`;
+281 across the solution.
+
+- `IGumpStudioPlugin` / `IPluginHost` carry no UI type at all. Menu
+  contributions are declarative descriptors the shell renders, so a plugin never
+  constructs a widget. The old `BasePlugin.Load(DesignerForm)` handed plugins the
+  WinForms window and its menu items.
+- Plugin identity is a stable id string. The original compared all five
+  description fields by value, so bumping a version silently un-loaded a plugin.
+- `PluginLoader` gives each assembly its own collectible `AssemblyLoadContext`,
+  so plugins can be unloaded instead of demanding an application restart. A
+  plugin that throws while loading is reported and skipped; the original
+  enumerated types outside its try block, so one bad assembly aborted discovery
+  for everything after it.
+- Plugin mutation goes through `IGumpDocumentSession.Apply`, so a plugin's edits
+  are undoable like any other. The old API handed over the live object graph with
+  no undo integration.
+
+The POL exporter is ported with both dialects preserved — the `GF*` gump-package
+calls and the raw layout-string array — and three corrections:
+
+- Coordinates come from `GetAbsolutePosition()`, fixing the inherited
+  nested-group defect. Visible in real output: a child at (5,5) inside a group at
+  (150,60) now exports at 155,65.
+- Text is escaped before being interpolated into a quoted POL string. The
+  original emitted a script that would not compile if any text contained a quote.
+- Numbers format invariantly, and the header timestamp is injectable, so two
+  exports of the same gump are byte-identical and can be diffed. The original
+  stamped `DateTime.Now` into every export.
+
+`SnapToGrid` and `WallPaper` are not ported. They were canvas-hook demos for an
+API that no longer exists in that shape; the equivalent extension points
+(`ICanvasLayer`, `IPointerInputFilter`) are named in the contract but are not
+implemented until the shell exists to host them.
 
 ## Phase 6 — Cleanup ⬜
 

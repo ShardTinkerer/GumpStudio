@@ -37,6 +37,7 @@ internal static class Program
                 "info" => Info(args[1..]),
                 "render" => Render(args[1..]),
                 "sample" => Sample(args[1..]),
+                "export" => Export(args[1..]),
                 "help" or "--help" or "-h" => PrintUsage(),
                 _ => Fail($"Unknown command '{args[0]}'."),
             };
@@ -196,6 +197,50 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>Exports a document as a POL script.</summary>
+    private static int Export(string[] args)
+    {
+        if (ParseOptions(args) is not { } options || options.Input is null)
+        {
+            return Fail("export requires --in <file.gump>.");
+        }
+
+        GumpDocument document = IsXml(options.Input)
+            ? GumpXmlSerializer.Load(options.Input)
+            : LegacyGumpImporter.ImportDocument(options.Input);
+
+        GumpStudio.Plugins.Pol.PolExporter exporter = new();
+
+        if (options.Style is { } style)
+        {
+            exporter.Options = exporter.Options with
+            {
+                Style = string.Equals(style, "layout", StringComparison.OrdinalIgnoreCase)
+                    ? GumpStudio.Plugins.Pol.PolScriptStyle.LayoutStrings
+                    : GumpStudio.Plugins.Pol.PolScriptStyle.GumpPackage,
+            };
+        }
+
+        string script = exporter.Export(
+            document,
+            new GumpStudio.Core.Export.GumpExportOptions
+            {
+                GumpName = options.Name ?? "MyGump",
+            });
+
+        if (options.Output is null)
+        {
+            Console.Write(script);
+        }
+        else
+        {
+            File.WriteAllText(options.Output, script);
+            Console.WriteLine($"Wrote {options.Output}.");
+        }
+
+        return 0;
+    }
+
     /// <summary>Distinguishes the new XML format from a legacy binary one.</summary>
     private static bool IsXml(string path)
     {
@@ -256,6 +301,16 @@ internal static class Program
                     i++;
                     break;
 
+                case "--style" when value is not null:
+                    options = options with { Style = value };
+                    i++;
+                    break;
+
+                case "--name" when value is not null:
+                    options = options with { Name = value };
+                    i++;
+                    break;
+
                 case "--page" when value is not null:
                     options = options with { Page = ParseId(value) };
                     i++;
@@ -294,6 +349,7 @@ internal static class Program
                               [--hue <n>] [--partial-hue] [--out <file.png>]
               gumpstudio render --client <path> --in <file.gump> [--page <n>] [--out <file.png>]
               gumpstudio sample [--out <file.gump>]
+              gumpstudio export --in <file.gump> [--style pkg|layout] [--name <n>] [--out <file.src>]
 
             Ids accept decimal or 0x-prefixed hexadecimal.
             Hues are one-based, matching the values gump scripts use; 0 means none.
@@ -311,5 +367,7 @@ internal static class Program
         bool PartialHue,
         string? Output,
         string? Input = null,
-        int Page = 0);
+        int Page = 0,
+        string? Style = null,
+        string? Name = null);
 }

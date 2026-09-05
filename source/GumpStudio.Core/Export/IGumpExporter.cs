@@ -22,11 +22,21 @@ public interface IGumpExporter
     string Export(GumpDocument document, GumpExportOptions options);
 }
 
-/// <summary>Settings common to every exporter.</summary>
-/// <param name="GumpName">Identifier used for the generated gump or function.</param>
-/// <param name="Namespace">Namespace or scope, where the target language has one.</param>
-/// <param name="IncludeComments">Whether to emit element comments into the output.</param>
-public readonly record struct GumpExportOptions(
-    string GumpName = "MyGump",
-    string Namespace = "Gumps",
-    bool IncludeComments = true);
+/// <summary>
+/// Settings common to every exporter.
+/// </summary>
+/// <remarks>
+/// A record class, not a struct: defaulted primary-constructor parameters on a
+/// struct are skipped by <c>default</c>, which would leave the name null.
+/// </remarks>
+public sealed record GumpExportOptions
+{
+    /// <summary>Identifier used for the generated gump or function.</summary>
+    public string GumpName { get; init; } = "MyGump";
+
+    /// <summary>Namespace or scope, where the target language has one.</summary>
+    public string Namespace { get; init; } = "Gumps";
+
+    /// <summary>Whether to emit element comments into the output.</summary>
+    public bool IncludeComments { get; init; } = true;
+}

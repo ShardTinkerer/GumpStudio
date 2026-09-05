@@ -7,17 +7,27 @@ using SkiaSharp;
 
 namespace GumpStudio.Rendering;
 
-/// <summary>How much decoration the renderer draws around the gump itself.</summary>
-/// <param name="DrawSelection">Draw selection outlines and resize handles.</param>
-/// <param name="DrawGroupOutlines">Outline groups, which have no art of their own.</param>
-/// <param name="BackgroundColor">Canvas fill, or null to leave it transparent.</param>
-public readonly record struct RenderOptions(
-    bool DrawSelection = true,
-    bool DrawGroupOutlines = true,
-    SKColor? BackgroundColor = null)
+/// <summary>
+/// How much decoration the renderer draws around the gump itself.
+/// </summary>
+/// <remarks>
+/// A record class, not a struct: defaulted primary-constructor parameters on a
+/// struct are skipped by <c>default</c>, so an omitted argument would silently
+/// mean "draw nothing extra" rather than the stated defaults.
+/// </remarks>
+public sealed record RenderOptions
 {
+    /// <summary>Draw selection outlines and resize handles.</summary>
+    public bool DrawSelection { get; init; } = true;
+
+    /// <summary>Outline groups, which have no art of their own.</summary>
+    public bool DrawGroupOutlines { get; init; } = true;
+
+    /// <summary>Canvas fill, or null to leave it transparent.</summary>
+    public SKColor? BackgroundColor { get; init; }
+
     /// <summary>Plain output with no editor decoration, for export and golden images.</summary>
-    public static RenderOptions Plain { get; } = new(DrawSelection: false, DrawGroupOutlines: false);
+    public static RenderOptions Plain { get; } = new() { DrawSelection = false, DrawGroupOutlines = false };
 }
 
 /// <summary>
@@ -34,10 +44,12 @@ public sealed class GumpRenderer(IGumpArtSource art)
     private readonly IGumpArtSource _art = art ?? throw new ArgumentNullException(nameof(art));
 
     /// <summary>Draws a whole page.</summary>
-    public void Render(SKCanvas canvas, GumpPage page, RenderOptions options = default)
+    public void Render(SKCanvas canvas, GumpPage page, RenderOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(page);
+
+        options ??= new RenderOptions();
 
         if (options.BackgroundColor is { } background)
         {
@@ -61,7 +73,7 @@ public sealed class GumpRenderer(IGumpArtSource art)
     }
 
     /// <summary>Renders a page into a new bitmap of the given size.</summary>
-    public SKBitmap RenderToBitmap(GumpPage page, int width, int height, RenderOptions options = default)
+    public SKBitmap RenderToBitmap(GumpPage page, int width, int height, RenderOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(page);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);

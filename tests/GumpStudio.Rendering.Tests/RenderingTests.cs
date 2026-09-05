@@ -218,7 +218,7 @@ public class GumpRendererTests
         GumpRenderer renderer = new(new TestArtSource(art));
 
         using SKBitmap plain = renderer.RenderToBitmap(page, 64, 64, RenderOptions.Plain);
-        using SKBitmap decorated = renderer.RenderToBitmap(page, 64, 64, new RenderOptions(DrawSelection: true));
+        using SKBitmap decorated = renderer.RenderToBitmap(page, 64, 64, new RenderOptions { DrawSelection = true });
 
         // A handle sits at the top-left corner, outside the element itself.
         Assert.Equal(0, PixelAt(plain, 18, 18).Alpha);
