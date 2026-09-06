@@ -35,6 +35,10 @@
       <MenuItem Header="_View">
         <MenuItem Header="Show page _0 beneath this page" Name="MenuShowPage0"
                   ToggleType="CheckBox" IsChecked="True" />
+        <Separator />
+        <MenuItem Header="Show _grid" Name="MenuShowGrid" ToggleType="CheckBox" />
+        <MenuItem Header="_Snap to grid" Name="MenuSnapToGrid" ToggleType="CheckBox" />
+        <MenuItem Header="Grid _size…" Name="MenuGridSize" />
       </MenuItem>
 
       <MenuItem Header="_Page">

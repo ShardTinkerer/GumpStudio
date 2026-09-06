@@ -16,6 +16,18 @@ public sealed class AppSettings
     /// <summary>The Ultima Online installation to read art from.</summary>
     public string? ClientPath { get; set; }
 
+    /// <summary>Design-grid spacing in gump pixels.</summary>
+    public int GridWidth { get; set; } = 5;
+
+    /// <summary>Design-grid spacing in gump pixels.</summary>
+    public int GridHeight { get; set; } = 5;
+
+    /// <summary>Whether the grid is drawn.</summary>
+    public bool GridVisible { get; set; }
+
+    /// <summary>Whether moving and resizing snap to the grid.</summary>
+    public bool GridSnap { get; set; }
+
     /// <summary>Where the settings file lives.</summary>
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

@@ -1,7 +1,8 @@
 # Testing
 
 ```sh
-dotnet test GumpStudio.slnx
+dotnet build GumpStudio.slnx
+pwsh eng/run-tests.ps1
 ```
 
 Tests run on **Microsoft.Testing Platform** (xunit.v3). .NET 10 removed the
@@ -11,7 +12,25 @@ VSTest bridge, so the opt-in lives in `global.json`:
 "test": { "runner": "Microsoft.Testing.Platform" }
 ```
 
-CI uses `--report-trx --coverage`, not the old `--logger` / `--collect` flags.
+## Why not `dotnet test`
+
+MTP test projects are self-executing applications, and `eng/run-tests.ps1`
+launches each one directly. That is a workaround, not a style choice:
+
+> On SDK **10.0.400**, `dotnet test` reports `Zero tests ran` (exit code 5) for
+> every project in this solution, in about 150 ms - the child never gets as far
+> as discovery. The same executables run their full suites correctly when
+> launched directly. The failure reproduces with a **one-file xunit.v3 project
+> in an empty directory**, on both xunit.v3 4.0.0 and 3.1.0, so it is a
+> toolchain defect rather than anything about this repository.
+
+The script forwards `--report-trx`, `--results-directory` and `--coverage`, so
+CI keeps the same artifacts it had before. Re-test `dotnet test` after an SDK
+bump; if it starts working, the script can go.
+
+Exit code 8 (every test skipped or filtered out) is treated as success, since
+that is what a client-data-only project would return on a machine with no UO
+installation.
 
 ## Testing against real UO clients
 
@@ -28,7 +47,7 @@ has them. Tests that need one are **skipped, not failed**.
 $env:GUMPSTUDIO_TEST_CLIENT     = "C:\...\Ultima Online Mondain's Legacy"
 $env:GUMPSTUDIO_TEST_CLIENT_UOP = "C:\...\Ultima Online Classic"
 $env:GUMPSTUDIO_TEST_CLIENT_ROOT= "F:\UOClients"
-dotnet test GumpStudio.slnx
+pwsh eng/run-tests.ps1
 ```
 
 A variable pointing at a nonexistent directory throws rather than silently

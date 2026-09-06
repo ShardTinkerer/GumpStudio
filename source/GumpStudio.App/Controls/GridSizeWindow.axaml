@@ -1,0 +1,29 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.GridSizeWindow"
+        Title="Grid size"
+        Width="300" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel Margin="16" Spacing="10">
+
+    <Grid ColumnDefinitions="70,*" RowDefinitions="Auto,Auto" >
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Width" VerticalAlignment="Center" />
+      <NumericUpDown Grid.Row="0" Grid.Column="1" Name="WidthBox"
+                     Minimum="1" Maximum="256" Increment="1" FormatString="0" />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Height" VerticalAlignment="Center"
+                 Margin="0,8,0,0" />
+      <NumericUpDown Grid.Row="1" Grid.Column="1" Name="HeightBox"
+                     Minimum="1" Maximum="256" Increment="1" FormatString="0"
+                     Margin="0,8,0,0" />
+    </Grid>
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="80" />
+      <Button Name="AcceptButton" Content="OK" MinWidth="80" IsDefault="True" />
+    </StackPanel>
+
+  </StackPanel>
+</Window>

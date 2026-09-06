@@ -61,6 +61,9 @@ public sealed class CanvasInteractionController(UndoHistory history)
     /// <summary>The marquee rectangle while one is being dragged.</summary>
     public GumpRect? Marquee { get; private set; }
 
+    /// <summary>The design grid. Moving and resizing snap to it when enabled.</summary>
+    public GridSettings Grid { get; } = new();
+
     /// <summary>True while a gesture is in progress.</summary>
     public bool IsDragging => Mode != DragMode.None;
 
@@ -175,6 +178,18 @@ public sealed class CanvasInteractionController(UndoHistory history)
 
         if (Mode == DragMode.Move)
         {
+            if (Grid.SnapEnabled && _primary is not null)
+            {
+                // Snap the element the user grabbed, then move the rest of the
+                // selection by the same corrected delta. Snapping each element
+                // independently would pull a carefully spaced row together.
+                GumpRect anchor = _dragStart[_primary];
+                GumpPoint snapped = Grid.Snap(new GumpPoint(anchor.X + dx, anchor.Y + dy));
+
+                dx = snapped.X - anchor.X;
+                dy = snapped.Y - anchor.Y;
+            }
+
             foreach ((Element element, GumpRect start) in _dragStart)
             {
                 element.Location = new GumpPoint(start.X + dx, start.Y + dy);
@@ -183,6 +198,11 @@ public sealed class CanvasInteractionController(UndoHistory history)
         else if (_primary is not null)
         {
             GumpRect resized = HandleGeometry.Resize(_primaryStart, Mode, dx, dy);
+
+            if (Grid.SnapEnabled)
+            {
+                resized = Grid.Snap(resized);
+            }
 
             _primary.Location = resized.Location;
             _primary.Size = resized.Size;
@@ -246,12 +266,24 @@ public sealed class CanvasInteractionController(UndoHistory history)
         OnChanged();
     }
 
-    /// <summary>Moves the selection by a keyboard step, as one undo entry per run.</summary>
+    /// <summary>
+    /// Moves the selection by a keyboard step, as one undo entry per run.
+    /// </summary>
+    /// <remarks>
+    /// With snapping on, a step is one grid cell rather than one pixel, so the
+    /// keyboard and the mouse agree about where things can land.
+    /// </remarks>
     public void Nudge(int dx, int dy)
     {
         if (_selection.Count == 0 || (dx == 0 && dy == 0))
         {
             return;
+        }
+
+        if (Grid.SnapEnabled)
+        {
+            dx *= Grid.Width;
+            dy *= Grid.Height;
         }
 
         using UndoHistory.CompositeScope scope = history.BeginComposite("Nudge");

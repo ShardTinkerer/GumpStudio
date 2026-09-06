@@ -281,3 +281,193 @@ public class CanvasInteractionTests
         Assert.Empty(controller.Selection);
     }
 }
+
+/// <summary>
+/// The design grid, which was the SnapToGrid plugin in 1.8 and is a built-in
+/// feature here.
+/// </summary>
+public class GridSettingsTests
+{
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(2, 0)]
+    [InlineData(3, 5)]
+    [InlineData(7, 5)]
+    [InlineData(8, 10)]
+    [InlineData(12, 10)]
+    [InlineData(13, 15)]
+    public void SnapsToTheNearestGridLine(int input, int expected)
+    {
+        GridSettings grid = new() { Width = 5, Height = 5 };
+
+        Assert.Equal(expected, grid.SnapX(input));
+        Assert.Equal(expected, grid.SnapY(input));
+    }
+
+    /// <summary>
+    /// Integer division truncates toward zero, which would round negatives the
+    /// wrong way. Elements can sit at negative coordinates inside a group.
+    /// </summary>
+    [Theory]
+    [InlineData(-1, 0)]
+    [InlineData(-2, 0)]
+    [InlineData(-3, -5)]
+    [InlineData(-7, -5)]
+    [InlineData(-8, -10)]
+    public void SnapsNegativeCoordinatesCorrectly(int input, int expected)
+    {
+        GridSettings grid = new() { Width = 5, Height = 5 };
+
+        Assert.Equal(expected, grid.SnapX(input));
+    }
+
+    [Fact]
+    public void SpacingIsAlwaysAtLeastOne()
+    {
+        GridSettings grid = new() { Width = 0, Height = -4 };
+
+        Assert.Equal(1, grid.Width);
+        Assert.Equal(1, grid.Height);
+    }
+
+    [Fact]
+    public void SnappingARectangleKeepsItAtLeastOneCell()
+    {
+        GridSettings grid = new() { Width = 10, Height = 10 };
+
+        GumpRect snapped = grid.Snap(new GumpRect(2, 2, 1, 1));
+
+        Assert.Equal(10, snapped.Width);
+        Assert.Equal(10, snapped.Height);
+    }
+}
+
+public class SnapToGridInteractionTests
+{
+    private static (CanvasInteractionController Controller, UndoHistory History, GumpPage Page) Setup()
+    {
+        UndoHistory history = new();
+        GumpPage page = new();
+        CanvasInteractionController controller = new(history) { Page = page };
+
+        controller.Grid.Width = 10;
+        controller.Grid.Height = 10;
+        controller.Grid.SnapEnabled = true;
+
+        return (controller, history, page);
+    }
+
+    private static AlphaElement AddBox(GumpPage page, int x, int y, int w = 20, int h = 20)
+    {
+        AlphaElement element = new() { Location = new GumpPoint(x, y), Size = new GumpSize(w, h) };
+
+        page.Root.Add(element);
+
+        return element;
+    }
+
+    [Fact]
+    public void DraggingLandsOnTheGrid()
+    {
+        (CanvasInteractionController controller, _, GumpPage page) = Setup();
+
+        AlphaElement box = AddBox(page, 0, 0);
+
+        controller.Select(box);
+
+        controller.PointerPressed(new GumpPoint(5, 5));
+        controller.PointerMoved(new GumpPoint(28, 33));
+        controller.PointerReleased(new GumpPoint(28, 33));
+
+        // Moved by (23, 28) from origin, which snaps to (20, 30).
+        Assert.Equal(new GumpPoint(20, 30), box.Location);
+    }
+
+    /// <summary>
+    /// Snapping each element on its own would collapse a deliberately spaced
+    /// row; only the grabbed element snaps and the rest follow by the same delta.
+    /// </summary>
+    [Fact]
+    public void AMultiSelectionKeepsItsRelativeLayout()
+    {
+        (CanvasInteractionController controller, _, GumpPage page) = Setup();
+
+        AlphaElement grabbed = AddBox(page, 0, 0);
+        AlphaElement offGrid = AddBox(page, 33, 7);
+
+        controller.SelectAll();
+
+        controller.PointerPressed(new GumpPoint(5, 5));
+        controller.PointerMoved(new GumpPoint(28, 33));
+        controller.PointerReleased(new GumpPoint(28, 33));
+
+        Assert.Equal(new GumpPoint(20, 30), grabbed.Location);
+
+        // The second element kept its 33,7 offset relative to the first.
+        Assert.Equal(new GumpPoint(53, 37), offGrid.Location);
+    }
+
+    [Fact]
+    public void ResizingLandsOnTheGrid()
+    {
+        (CanvasInteractionController controller, _, GumpPage page) = Setup();
+
+        AlphaElement box = AddBox(page, 0, 0, 20, 20);
+
+        controller.Select(box);
+
+        GumpRect handle = HandleGeometry.GetHandleRect(box.GetAbsoluteBounds(), DragMode.ResizeBottomRight);
+
+        controller.PointerPressed(handle.Center);
+        controller.PointerMoved(handle.Center.Offset(13, 6));
+        controller.PointerReleased(handle.Center.Offset(13, 6));
+
+        Assert.Equal(new GumpSize(30, 30), box.Size);
+    }
+
+    [Fact]
+    public void NudgingStepsOneCellWhenSnapping()
+    {
+        (CanvasInteractionController controller, _, GumpPage page) = Setup();
+
+        AlphaElement box = AddBox(page, 0, 0);
+
+        controller.Select(box);
+        controller.Nudge(1, 0);
+
+        Assert.Equal(new GumpPoint(10, 0), box.Location);
+    }
+
+    [Fact]
+    public void NudgingStepsOnePixelWhenNotSnapping()
+    {
+        (CanvasInteractionController controller, _, GumpPage page) = Setup();
+
+        controller.Grid.SnapEnabled = false;
+
+        AlphaElement box = AddBox(page, 0, 0);
+
+        controller.Select(box);
+        controller.Nudge(1, 0);
+
+        Assert.Equal(new GumpPoint(1, 0), box.Location);
+    }
+
+    [Fact]
+    public void SnappingOffLeavesPositionsExact()
+    {
+        (CanvasInteractionController controller, _, GumpPage page) = Setup();
+
+        controller.Grid.SnapEnabled = false;
+
+        AlphaElement box = AddBox(page, 0, 0);
+
+        controller.Select(box);
+
+        controller.PointerPressed(new GumpPoint(5, 5));
+        controller.PointerMoved(new GumpPoint(28, 33));
+        controller.PointerReleased(new GumpPoint(28, 33));
+
+        Assert.Equal(new GumpPoint(23, 28), box.Location);
+    }
+}

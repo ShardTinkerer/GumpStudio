@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
         BuildToolbox();
         WireMenus();
+        LoadGridSettings();
 
         LoadExternalPlugins();
         BuildExportMenu();
@@ -83,6 +84,9 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuGroup", GroupSelection);
         Click("MenuAddPage", () => { _session.Document.AddPage(); RefreshAll(); });
         Click("MenuShowPage0", ToggleSharedPage);
+        Click("MenuShowGrid", ApplyGridSettings);
+        Click("MenuSnapToGrid", ApplyGridSettings);
+        ClickAsync("MenuGridSize", ChooseGridSizeAsync);
         Click("MenuRemovePage", RemovePage);
 
         ClickAsync("MenuOpen", OpenAsync);
@@ -204,6 +208,69 @@ public sealed partial class MainWindow : Window, IDisposable
         _canvas.ShowSharedPage = this.FindControl<MenuItem>("MenuShowPage0")?.IsChecked ?? true;
 
         _canvas.InvalidateVisual();
+    }
+
+    /// <summary>Reads the grid toggles back into the editing session.</summary>
+    private void ApplyGridSettings()
+    {
+        _session.Canvas.Grid.Visible = this.FindControl<MenuItem>("MenuShowGrid")?.IsChecked ?? false;
+        _session.Canvas.Grid.SnapEnabled = this.FindControl<MenuItem>("MenuSnapToGrid")?.IsChecked ?? false;
+
+        SaveSettings();
+
+        _canvas.InvalidateVisual();
+    }
+
+    private async Task ChooseGridSizeAsync()
+    {
+        GridSizeWindow dialog = new(_session.Canvas.Grid.Width, _session.Canvas.Grid.Height);
+
+        await dialog.ShowDialog(this).ConfigureAwait(true);
+
+        if (dialog.Result is not { } size)
+        {
+            return;
+        }
+
+        _session.Canvas.Grid.Width = size.Width;
+        _session.Canvas.Grid.Height = size.Height;
+
+        SaveSettings();
+
+        _canvas.InvalidateVisual();
+        SetStatus($"Grid set to {size.Width} x {size.Height}.");
+    }
+
+    private void SaveSettings()
+    {
+        AppSettings settings = AppSettings.Load();
+
+        settings.GridWidth = _session.Canvas.Grid.Width;
+        settings.GridHeight = _session.Canvas.Grid.Height;
+        settings.GridVisible = _session.Canvas.Grid.Visible;
+        settings.GridSnap = _session.Canvas.Grid.SnapEnabled;
+
+        AppSettings.Save(settings);
+    }
+
+    private void LoadGridSettings()
+    {
+        AppSettings settings = AppSettings.Load();
+
+        _session.Canvas.Grid.Width = settings.GridWidth;
+        _session.Canvas.Grid.Height = settings.GridHeight;
+        _session.Canvas.Grid.Visible = settings.GridVisible;
+        _session.Canvas.Grid.SnapEnabled = settings.GridSnap;
+
+        if (this.FindControl<MenuItem>("MenuShowGrid") is { } show)
+        {
+            show.IsChecked = settings.GridVisible;
+        }
+
+        if (this.FindControl<MenuItem>("MenuSnapToGrid") is { } snap)
+        {
+            snap.IsChecked = settings.GridSnap;
+        }
     }
 
     private void RemovePage()

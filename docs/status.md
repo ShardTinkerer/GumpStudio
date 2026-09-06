@@ -1,6 +1,7 @@
 # Status and roadmap
 
-Last updated at the end of Phase 4. Phases 0, 1, 2, 3 and 5 are complete.
+Last updated after the snap-to-grid work. Phases 0, 1, 2, 3, 4 and 5 are
+complete; Phase 6 is partly done.
 
 ## Why the rewrite exists
 
@@ -32,7 +33,7 @@ serve as the behaviour reference where the existing port looks wrong.
 | Legacy `.gump` | Read-only importer via `System.Formats.Nrbf`; `BinaryFormatter` is never enabled |
 | Client data | `.mul` **and** `.uop` |
 | Plugins | External-DLL model kept, but the contract is UI-agnostic |
-| Exporters | **POL only.** RunUO exporter, RunUO importer, Sphere and Wolfpack are dropped |
+| Exporters | POL, plus RunUO and Sphere gump export. The RunUO *importer* and Wolfpack stay dropped |
 
 ## Phase 0 — Foundation ✅
 
@@ -56,8 +57,11 @@ Toolchain notes worth keeping:
 - `System.Text.Encoding.CodePages` is in-box on .NET 10; referencing it is an
   `NU1510` error.
 - .NET 10 dropped the VSTest bridge. xunit.v3 runs on Microsoft.Testing
-  Platform, opted into by a `"test"` block in `global.json`. Test projects are
-  `OutputType=Exe`; CI uses `--report-trx --coverage`.
+  Platform, opted into by a `"test"` block in `global.json` **and** by
+  `UseMicrosoftTestingPlatformRunner` in `tests/Directory.Build.props` — xunit.v3
+  4.0.0 otherwise defaults to its own console runner, which silently ignores
+  every MTP flag. `dotnet test` itself is unusable on SDK 10.0.400 and the suite
+  runs through `eng/run-tests.ps1`; see [testing.md](testing.md) for why.
 - The legacy tree needs two shields: an empty `src/Directory.Build.props`, plus
   `ImportDirectoryPackagesProps=false` because NuGet re-sets
   `ManagePackageVersionsCentrally` after that file is imported.
@@ -149,8 +153,9 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 300 tests across the solution; 133 pass and 17 skip with no client
-configured, so CI stays green.
+Done. 328 tests across the solution; 6 skip when the single-client
+environment variables are unset, and the client-data theories skip entirely when
+no installation is configured, so CI stays green.
 
 - `CanvasInteractionController` lives in **Core**, not the UI, so selection,
   dragging, resizing, marquee and nudging are tested directly. In the original
@@ -193,6 +198,40 @@ property panel showing "Nothing selected". The list rebuilt its item source on
 every refresh, and the resulting selection-reset event raced the suppression
 flag. It now rebuilds only when the page contents actually change.
 
+### Snap to grid, built in
+
+In 1.8 this was `SnapToGrid.dll`: a plugin that reached into the designer form
+through mouse and key hooks, drew its grid by writing bytes into a locked bitmap
+with `Marshal.WriteByte`, and persisted its own `BinaryFormatter` config file
+beside the executable. Aligning elements is core editing behaviour, not an
+optional extension, so it lives in the editor now.
+
+`GridSettings` in Core owns spacing, visibility and snapping, and is the single
+place rounding is defined. Two details are deliberate:
+
+- **Visibility and snapping are independent toggles.** Wanting to see the grid
+  and wanting to be constrained by it are different wishes.
+- **Rounding floors rather than truncating.** Integer division truncates toward
+  zero, which biases negative coordinates the wrong way — elements dragged left
+  of the origin would snap inconsistently with ones dragged right of it.
+
+Behaviour on the canvas:
+
+- Dragging snaps the element the pointer grabbed, then moves the rest of the
+  selection by that same corrected delta. Snapping each element independently
+  would pull a carefully spaced row together into a single column.
+- Resizing snaps each edge on its own, so the edge being dragged lands flush
+  with the grid rather than the origin snapping and the far edge staying off it.
+  An element can never be snapped down to nothing; one cell is the floor.
+- Arrow keys step one grid cell instead of one pixel while snapping is on, so
+  the keyboard and the mouse agree about where things can land.
+
+**View ▸ Show grid**, **Snap to grid** and **Grid size…** drive it, and all four
+values persist in the settings file. The grid renders in
+`GumpRenderer.RenderDocument` beneath the page-0 backdrop, and is skipped
+entirely below three screen pixels of spacing so a fine grid at low zoom does not
+turn into a grey wash.
+
 ### Page 0 is always visible
 
 Page 0 is Ultima Online's shared layer: its contents stay on screen while the
@@ -220,8 +259,7 @@ elements before `page 1` already expresses the same thing.
 
 Done ahead of Phase 4, because the plugin contract is UI-agnostic by design and
 therefore does not need the shell. Doing it first means the shell can wire up a
-real exporter rather than a stub. 14 tests in `GumpStudio.Plugins.Pol.Tests`;
-281 across the solution.
+real exporter rather than a stub. 20 tests in `GumpStudio.Plugins.Pol.Tests`.
 
 - `IGumpStudioPlugin` / `IPluginHost` carry no UI type at all. Menu
   contributions are declarative descriptors the shell renders, so a plugin never
@@ -250,10 +288,11 @@ calls and the raw layout-string array — and three corrections:
   exports of the same gump are byte-identical and can be diffed. The original
   stamped `DateTime.Now` into every export.
 
-`SnapToGrid` and `WallPaper` are not ported. They were canvas-hook demos for an
-API that no longer exists in that shape; the equivalent extension points
+`SnapToGrid` is not ported as a plugin — it is a built-in feature now, described
+under Phase 4. `WallPaper` is not ported either; both were canvas-hook demos for
+an API that no longer exists in that shape. The equivalent extension points
 (`ICanvasLayer`, `IPointerInputFilter`) are named in the contract but are not
-implemented until the shell exists to host them.
+implemented until something needs them.
 
 ## Phase 6 — Cleanup ◐ partly done
 
@@ -348,6 +387,24 @@ Anything already handled by the rewrite is marked.
 - Splash thread is not STA; no DPI awareness; no single-instance guard.
 - `Program.cs` sets `PrivateBinPath` on an already-created AppDomain (a no-op).
 
+## The 1.8r3 binaries
+
+`external/` holds both `Gumpstudio1.8r2` and `Gumpstudio1.8r3`. r3 was checked
+in case the rewrite was tracking a superseded release. It is not.
+
+Only two assemblies differ at all. `GumpStudio.exe`, `UOFont.dll` and **every
+plugin** are byte-identical between the two releases.
+
+| Assembly | Difference in r3 |
+|---|---|
+| `GumpStudioCore.dll` | VB designer field renames (`_Panel1` for `Panel1`) and the removal of `My.Settings`. No behaviour change. |
+| `Ultima.dll` | Drops `FastBitmap` and `PixelData`; adds `ClientProcessHandle`, `ClientWindowHandle`, `NativeMethods`, `Skill`, `SkillCategories`, `SkillCategory`, `SkillCategoryData`, `SkillData` and `Skills`. |
+
+The `Ultima` additions are skill-tree types and process-memory handles pulled in
+from a newer upstream UOSDK snapshot. Nothing in GumpStudio references them, and
+a gump editor has no use for either. **r3 contributes nothing the rewrite needs,
+and r2 remains the behaviour reference.**
+
 ## Known gaps
 
 - **The BWT decoder is only covered by real-client tests**, so CI does not
@@ -360,3 +417,11 @@ Anything already handled by the rewrite is marked.
 - **Resolving a UOP gump's dimensions requires decoding it**, because the size
   lives inside the compressed payload. An art browser must therefore virtualise
   and resolve lazily rather than measuring everything up front.
+- **`dotnet test` does not work on SDK 10.0.400.** It reports `Zero tests ran`
+  for every project, reproducibly, including for a one-file xunit.v3 project in
+  an empty directory. `eng/run-tests.ps1` launches the test applications
+  directly instead. Retry `dotnet test` after an SDK bump.
+- **Gump commands added after 1.8 are not modelled yet** — `picinpic`,
+  `buttontileart`, `xmfhtmltok`, `tooltip`, `itemproperty`, `mastergump` and the
+  rest. These are the next piece of work, and the RunUO and Sphere exporters
+  follow, since they need the element types to exist first.

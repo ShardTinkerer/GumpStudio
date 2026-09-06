@@ -38,6 +38,9 @@ public sealed record RenderOptions
     /// </remarks>
     public bool ShowSharedPage { get; init; } = true;
 
+    /// <summary>The design grid to draw, or null for none.</summary>
+    public Core.Editing.GridSettings? Grid { get; init; }
+
     /// <summary>Plain output with no editor decoration, for export and golden images.</summary>
     public static RenderOptions Plain { get; } = new() { DrawSelection = false, DrawGroupOutlines = false };
 }
@@ -67,6 +70,8 @@ public sealed class GumpRenderer(IGumpArtSource art)
         {
             canvas.Clear(background);
         }
+
+        DrawGrid(canvas, options);
 
         ElementPainter painter = new(canvas, _art, options);
 
@@ -111,6 +116,9 @@ public sealed class GumpRenderer(IGumpArtSource art)
             // Drawn without selection decoration: it is context, not what the
             // user is editing, and its elements are not selectable from here.
             Render(canvas, document.Pages[0], options with { DrawSelection = false });
+
+            // The grid is drawn once, by the page-0 pass above.
+            options = options with { Grid = null };
         }
 
         Render(canvas, document.Pages[active], options);
@@ -128,6 +136,48 @@ public sealed class GumpRenderer(IGumpArtSource art)
         if (active != 0)
         {
             MeasureContentSizes(document.Pages[active]);
+        }
+    }
+
+    /// <summary>
+    /// Draws the design grid behind everything else.
+    /// </summary>
+    /// <remarks>
+    /// Dots at the intersections rather than full lines: a line grid over
+    /// low-contrast gump art is hard to see past, while dots stay readable
+    /// without competing with the artwork.
+    /// </remarks>
+    private static void DrawGrid(SKCanvas canvas, RenderOptions options)
+    {
+        if (options.Grid is not { Visible: true } grid)
+        {
+            return;
+        }
+
+        SKRect bounds = canvas.LocalClipBounds;
+
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        // A grid finer than a couple of pixels turns into a solid wash and costs
+        // a draw call per dot, so stop drawing rather than produce noise.
+        const int MinimumVisibleSpacing = 3;
+
+        if (grid.Width < MinimumVisibleSpacing || grid.Height < MinimumVisibleSpacing)
+        {
+            return;
+        }
+
+        using SKPaint paint = new() { Color = new SKColor(0xFF, 0xFF, 0xFF, 0x38) };
+
+        for (float y = 0; y < bounds.Bottom; y += grid.Height)
+        {
+            for (float x = 0; x < bounds.Right; x += grid.Width)
+            {
+                canvas.DrawRect(x, y, 1, 1, paint);
+            }
         }
     }
 

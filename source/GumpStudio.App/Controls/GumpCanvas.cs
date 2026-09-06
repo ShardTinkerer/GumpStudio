@@ -123,6 +123,7 @@ public sealed class GumpCanvas : Control, IDisposable
                     DrawSelection = true,
                     DrawGroupOutlines = true,
                     ShowSharedPage = ShowSharedPage,
+                    Grid = _session.Canvas.Grid,
                 });
 
             DrawMarquee(skia.Canvas);

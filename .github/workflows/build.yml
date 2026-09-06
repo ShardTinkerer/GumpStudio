@@ -40,16 +40,15 @@ jobs:
       # when it is unset, which is always the case on CI. Everything else runs
       # against checked-in synthetic fixtures.
       #
-      # xunit.v3 runs on Microsoft.Testing.Platform (opted into via global.json),
-      # so these are MTP flags, not the old VSTest ones.
+      # The test projects are launched directly rather than via `dotnet test`,
+      # which reports "Zero tests ran" on SDK 10.0.400. See docs/testing.md.
       - name: Test
+        shell: pwsh
         run: >
-          dotnet test GumpStudio.slnx
-          --configuration Release
-          --no-build
-          --report-trx
-          --coverage
-          --results-directory ./artifacts/test-results
+          ./eng/run-tests.ps1
+          -Configuration Release
+          -ResultsDirectory ./artifacts/test-results
+          -Coverage
 
       - name: Upload test results
         if: always()
