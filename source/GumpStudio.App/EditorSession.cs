@@ -172,7 +172,13 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
     public void Notify(PluginNotificationLevel level, string message) =>
         Notified?.Invoke(this, new PluginNotification(level, message));
 
-    /// <summary>Measures art-derived element sizes on the active page.</summary>
+    /// <summary>
+    /// Measures art-derived element sizes on every page the canvas draws.
+    /// </summary>
+    /// <remarks>
+    /// That includes page 0, which stays visible beneath whatever page is being
+    /// edited, so its elements need real sizes even when it is not active.
+    /// </remarks>
     public void MeasureActivePage()
     {
         if (_art is null)
@@ -180,7 +186,7 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
             return;
         }
 
-        new GumpRenderer(_art).MeasureContentSizes(ActivePage);
+        new GumpRenderer(_art).MeasureDocument(_document, _activePageIndex);
     }
 
     private void Replace(GumpDocument document, string? path)

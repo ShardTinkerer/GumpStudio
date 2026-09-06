@@ -239,6 +239,22 @@ The offset table is 65536 entries because any code point may have a glyph. The
 old implementation cached glyphs in a 1120-entry array indexed by the raw
 character, so anything at or above U+0460 threw.
 
+## Gump pages
+
+A gump is a list of pages, and the client shows one at a time — except **page 0,
+which is always visible**. Whatever page 0 contains stays on screen while the
+player switches between pages 1, 2 and so on, which is how a shared frame,
+title bar or close button is built.
+
+Two consequences:
+
+- An editor must draw page 0 beneath whichever page is being edited, or the
+  preview does not match what the player sees. `GumpRenderer.RenderDocument`
+  encodes this; `Render` on a single page deliberately does not, so the rule
+  lives in one place.
+- Exporters need no special handling: emitting `page 0`, its elements, then
+  `page 1` and its elements already expresses it.
+
 ## Legacy `.gump` files
 
 Not a client format, but the same territory: GumpStudio 1.8 saved documents as

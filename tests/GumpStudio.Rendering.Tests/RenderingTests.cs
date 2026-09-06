@@ -334,3 +334,146 @@ public class NineSliceTests
         Assert.NotEqual(0, output.GetPixel(0, 0).Alpha);
     }
 }
+
+/// <summary>
+/// Page 0 is Ultima Online's always-visible layer: whatever it holds stays on
+/// screen while the player switches between pages 1, 2 and so on.
+/// </summary>
+public class SharedPageTests
+{
+    private static readonly SKColor Shared = new(0xFF, 0x00, 0x00);
+    private static readonly SKColor Active = new(0x00, 0xFF, 0x00);
+
+    private static (GumpDocument Document, FakeArtSource Art) Build()
+    {
+        FakeArtSource art = new();
+
+        art.AddGump(1, 10, 10, Shared);
+        art.AddGump(2, 10, 10, Active);
+
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new ImageElement { GumpId = 1, Location = GumpPoint.Origin });
+
+        GumpPage second = document.AddPage();
+
+        second.Root.Add(new ImageElement { GumpId = 2, Location = new GumpPoint(20, 0) });
+
+        return (document, art);
+    }
+
+    [Fact]
+    public void Page0IsDrawnBeneathAnotherPage()
+    {
+        (GumpDocument document, FakeArtSource art) = Build();
+
+        using (art)
+        {
+            using SKBitmap output = Render(document, art, activePage: 1, new RenderOptions());
+
+            // Page 0's element and page 1's element are both on screen.
+            Assert.Equal(Shared, output.GetPixel(5, 5));
+            Assert.Equal(Active, output.GetPixel(25, 5));
+        }
+    }
+
+    [Fact]
+    public void Page0CanBeHidden()
+    {
+        (GumpDocument document, FakeArtSource art) = Build();
+
+        using (art)
+        {
+            using SKBitmap output = Render(
+                document, art, activePage: 1, new RenderOptions { ShowSharedPage = false });
+
+            Assert.Equal(0, output.GetPixel(5, 5).Alpha);
+            Assert.Equal(Active, output.GetPixel(25, 5));
+        }
+    }
+
+    [Fact]
+    public void Page0IsNotDrawnTwiceWhenItIsTheActivePage()
+    {
+        (GumpDocument document, FakeArtSource art) = Build();
+
+        using (art)
+        {
+            using SKBitmap output = Render(document, art, activePage: 0, new RenderOptions());
+
+            Assert.Equal(Shared, output.GetPixel(5, 5));
+
+            // Page 1's content must not leak onto page 0.
+            Assert.Equal(0, output.GetPixel(25, 5).Alpha);
+        }
+    }
+
+    /// <summary>
+    /// The backdrop is context, not the edit target, so it must not draw
+    /// selection handles for elements the user cannot grab from here.
+    /// </summary>
+    [Fact]
+    public void Page0DrawsWithoutSelectionDecoration()
+    {
+        using FakeArtSource art = new();
+
+        art.AddGump(1, 10, 10, Shared);
+
+        GumpDocument document = new();
+
+        // Away from the origin, so there is room for a handle to show outside it.
+        AlphaElement backdrop = new()
+        {
+            Location = new GumpPoint(20, 20),
+            Size = new GumpSize(10, 10),
+            IsSelected = true,
+        };
+
+        document.Pages[0].Root.Add(backdrop);
+        document.AddPage();
+
+        using SKBitmap onPage0 = Render(document, art, 0, new RenderOptions { DrawSelection = true });
+        using SKBitmap asBackdrop = Render(document, art, 1, new RenderOptions { DrawSelection = true });
+
+        // Selected on its own page, the top-left handle is drawn just outside it.
+        Assert.NotEqual(0, onPage0.GetPixel(19, 19).Alpha);
+
+        // As a backdrop it is context, not the edit target, so no handles.
+        Assert.Equal(0, asBackdrop.GetPixel(19, 19).Alpha);
+    }
+
+    [Fact]
+    public void MeasuringADocumentSizesBothPage0AndTheActivePage()
+    {
+        (GumpDocument document, FakeArtSource art) = Build();
+
+        using (art)
+        {
+            GumpRenderer renderer = new(new TestArtSource(art));
+
+            renderer.MeasureDocument(document, activePageIndex: 1);
+
+            Assert.Equal(new GumpSize(10, 10), document.Pages[0].Root.Children[0].Size);
+            Assert.Equal(new GumpSize(10, 10), document.Pages[1].Root.Children[0].Size);
+        }
+    }
+
+    private static SKBitmap Render(
+        GumpDocument document, FakeArtSource art, int activePage, RenderOptions options)
+    {
+        GumpRenderer renderer = new(new TestArtSource(art));
+
+        renderer.MeasureDocument(document, activePage);
+
+        SKBitmap bitmap = new(new SKImageInfo(64, 64, SKColorType.Bgra8888, SKAlphaType.Premul));
+
+        using SKCanvas canvas = new(bitmap);
+
+        canvas.Clear(SKColors.Transparent);
+
+        renderer.RenderDocument(canvas, document, activePage, options);
+        canvas.Flush();
+
+        return bitmap;
+    }
+}

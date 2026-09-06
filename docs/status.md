@@ -193,6 +193,18 @@ property panel showing "Nothing selected". The list rebuilt its item source on
 every refresh, and the resulting selection-reset event raced the suppression
 flag. It now rebuilds only when the page contents actually change.
 
+### Page 0 is always visible
+
+Page 0 is Ultima Online's shared layer: its contents stay on screen while the
+player switches pages. The canvas now draws it beneath whichever page is being
+edited, defaulting to on with a **View ▸ Show page 0** toggle, matching the
+original's behaviour. The backdrop draws without selection decoration and its
+elements are not selectable from another page, since they belong elsewhere.
+
+`GumpRenderer.RenderDocument` owns the rule so the canvas and the CLI cannot
+disagree about it. Exporters needed no change: emitting `page 0` and its
+elements before `page 1` already expresses the same thing.
+
 **Not built.** Still missing relative to the original:
 
 - A **hue picker**. Hues are still typed as numbers, and a hue is as opaque as a

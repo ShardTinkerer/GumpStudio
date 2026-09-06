@@ -26,6 +26,18 @@ public sealed record RenderOptions
     /// <summary>Canvas fill, or null to leave it transparent.</summary>
     public SKColor? BackgroundColor { get; init; }
 
+    /// <summary>
+    /// Draw page 0 beneath the active page.
+    /// </summary>
+    /// <remarks>
+    /// In Ultima Online page 0 is the always-visible layer: whatever it contains
+    /// stays on screen while the player switches between pages 1, 2 and so on.
+    /// Showing it while editing another page is the only way to see what the
+    /// finished gump will actually look like. The original defaulted this on and
+    /// offered a menu toggle; so does this.
+    /// </remarks>
+    public bool ShowSharedPage { get; init; } = true;
+
     /// <summary>Plain output with no editor decoration, for export and golden images.</summary>
     public static RenderOptions Plain { get; } = new() { DrawSelection = false, DrawGroupOutlines = false };
 }
@@ -69,6 +81,53 @@ public sealed class GumpRenderer(IGumpArtSource art)
             {
                 DrawSelection(canvas, element);
             }
+        }
+    }
+
+    /// <summary>
+    /// Draws a document's active page, with page 0 beneath it.
+    /// </summary>
+    /// <remarks>
+    /// Prefer this over <see cref="Render(SKCanvas, GumpPage, RenderOptions)"/>
+    /// whenever a document is in hand: page 0 being always-visible is a rule of
+    /// the format, not an editor preference, and encoding it once here keeps the
+    /// canvas, the CLI and any future preview honest about it.
+    /// </remarks>
+    public void RenderDocument(
+        SKCanvas canvas,
+        GumpDocument document,
+        int activePageIndex,
+        RenderOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        ArgumentNullException.ThrowIfNull(document);
+
+        options ??= new RenderOptions();
+
+        int active = Math.Clamp(activePageIndex, 0, document.PageCount - 1);
+
+        if (options.ShowSharedPage && active != 0)
+        {
+            // Drawn without selection decoration: it is context, not what the
+            // user is editing, and its elements are not selectable from here.
+            Render(canvas, document.Pages[0], options with { DrawSelection = false });
+        }
+
+        Render(canvas, document.Pages[active], options);
+    }
+
+    /// <summary>Measures art-derived sizes on every page the canvas will draw.</summary>
+    public void MeasureDocument(GumpDocument document, int activePageIndex)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        int active = Math.Clamp(activePageIndex, 0, document.PageCount - 1);
+
+        MeasureContentSizes(document.Pages[0]);
+
+        if (active != 0)
+        {
+            MeasureContentSizes(document.Pages[active]);
         }
     }
 

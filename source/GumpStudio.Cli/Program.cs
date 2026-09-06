@@ -141,14 +141,30 @@ internal static class Program
         using UoArtSource art = new(data);
 
         GumpRenderer renderer = new(art);
-        GumpPage page = document.Pages[Math.Clamp(options.Page, 0, document.PageCount - 1)];
 
-        renderer.MeasureContentSizes(page);
+        int active = Math.Clamp(options.Page, 0, document.PageCount - 1);
 
-        int width = Math.Max(1, page.Root.Size.Width);
-        int height = Math.Max(1, page.Root.Size.Height);
+        renderer.MeasureDocument(document, active);
 
-        using SkiaSharp.SKBitmap bitmap = renderer.RenderToBitmap(page, width, height, RenderOptions.Plain);
+        // Page 0 stays visible beneath every other page, so the output has to be
+        // big enough for both.
+        GumpSize activeSize = document.Pages[active].Root.Size;
+        GumpSize sharedSize = document.Pages[0].Root.Size;
+
+        int width = Math.Max(1, Math.Max(activeSize.Width, sharedSize.Width));
+        int height = Math.Max(1, Math.Max(activeSize.Height, sharedSize.Height));
+
+        using SkiaSharp.SKBitmap bitmap = new(
+            new SkiaSharp.SKImageInfo(width, height, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul));
+
+        using (SkiaSharp.SKCanvas canvas = new(bitmap))
+        {
+            canvas.Clear(SkiaSharp.SKColors.Transparent);
+
+            renderer.RenderDocument(canvas, document, active, RenderOptions.Plain);
+            canvas.Flush();
+        }
+
         using SkiaSharp.SKData encoded = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
 
         string output = options.Output ?? "gump.png";

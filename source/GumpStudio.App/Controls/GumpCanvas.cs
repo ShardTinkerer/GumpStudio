@@ -71,6 +71,15 @@ public sealed class GumpCanvas : Control, IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether page 0 is drawn beneath the active page.
+    /// </summary>
+    /// <remarks>
+    /// Page 0 is always visible in the client, so showing it is the default;
+    /// hiding it is occasionally useful when it obscures what you are editing.
+    /// </remarks>
+    public bool ShowSharedPage { get; set; } = true;
+
     /// <summary>Raised after a gesture changes the selection or geometry.</summary>
     public event EventHandler? InteractionChanged;
 
@@ -105,10 +114,16 @@ public sealed class GumpCanvas : Control, IDisposable
 
             skia.Canvas.Clear(SKColors.Transparent);
 
-            new GumpRenderer(art).Render(
+            new GumpRenderer(art).RenderDocument(
                 skia.Canvas,
-                _session.ActivePage,
-                new GumpRenderOptions { DrawSelection = true, DrawGroupOutlines = true });
+                _session.Document,
+                _session.ActivePageIndex,
+                new GumpRenderOptions
+                {
+                    DrawSelection = true,
+                    DrawGroupOutlines = true,
+                    ShowSharedPage = ShowSharedPage,
+                });
 
             DrawMarquee(skia.Canvas);
 

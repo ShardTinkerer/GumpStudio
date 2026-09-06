@@ -82,6 +82,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuDelete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
         Click("MenuGroup", GroupSelection);
         Click("MenuAddPage", () => { _session.Document.AddPage(); RefreshAll(); });
+        Click("MenuShowPage0", ToggleSharedPage);
         Click("MenuRemovePage", RemovePage);
 
         ClickAsync("MenuOpen", OpenAsync);
@@ -189,6 +190,20 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _session.History.Push(new GroupElementsCommand([.. _session.Canvas.Selection]));
         RefreshAll();
+    }
+
+    /// <summary>
+    /// Turns the always-visible page 0 backdrop on and off.
+    /// </summary>
+    /// <remarks>
+    /// It is on by default because that is what the player sees; hiding it helps
+    /// when a full-page background on page 0 obscures the page being edited.
+    /// </remarks>
+    private void ToggleSharedPage()
+    {
+        _canvas.ShowSharedPage = this.FindControl<MenuItem>("MenuShowPage0")?.IsChecked ?? true;
+
+        _canvas.InvalidateVisual();
     }
 
     private void RemovePage()
