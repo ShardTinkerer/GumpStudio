@@ -87,6 +87,24 @@ mistake in the hash and still round-trip perfectly.
 Closing it needs either a BWT encoder written purely for fixtures, or a small
 captured input/output pair checked in.
 
+## Driving the application for a screenshot
+
+Two Windows-specific traps, both of which produce a plausible-looking screenshot
+of the wrong thing:
+
+- **`CopyFromScreen` captures an Avalonia window as blank.** Use `PrintWindow`
+  with `PW_RENDERFULLCONTENT` (flag 2), per window. Never capture the whole
+  desktop — it picks up whatever else the user has open.
+- **`SetForegroundWindow` is refused** when the calling process does not already
+  own the foreground, so injected clicks land on whatever is actually in front
+  and the application under test never sees them. Nothing fails; the screenshot
+  simply shows an app that ignored every click. Attach to the foreground thread's
+  input queue first (`AttachThreadInput`), and **assert that the window really is
+  in front before sending anything** rather than trusting the call.
+
+Menu popups are separate top-level windows, so enumerate the process's visible
+windows rather than expecting them inside the main window's capture.
+
 ## Manual end-to-end check
 
 ```sh

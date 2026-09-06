@@ -28,6 +28,13 @@ public sealed class AppSettings
     /// <summary>Whether moving and resizing snap to the grid.</summary>
     public bool GridSnap { get; set; }
 
+    /// <summary>Whether the art browsers open as a tile grid rather than a list.</summary>
+    /// <remarks>
+    /// A grid by default: picking art is a visual task, and a list of one
+    /// thumbnail per row shows a fraction of what the same space can.
+    /// </remarks>
+    public bool ArtBrowserGallery { get; set; } = true;
+
     /// <summary>Where the settings file lives.</summary>
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

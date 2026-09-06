@@ -198,6 +198,30 @@ property panel showing "Nothing selected". The list rebuilt its item source on
 every refresh, and the resulting selection-reset event raced the suppression
 flag. It now rebuilds only when the page contents actually change.
 
+### The art browsers as a tile gallery
+
+Both browsers now open as a grid of thumbnails, with a **Gallery** toggle back to
+the one-per-row list. The choice persists.
+
+The grid had to be built by hand. Avalonia 12 ships no virtualizing wrap panel —
+only `VirtualizingStackPanel` — and a plain `WrapPanel` would realise all 39,516
+item tiles at once. So the same `ListBox` drives both modes and only the shape of
+its items differs: one entry per item in list mode, a whole **row** of entries per
+item in gallery mode, chunked to fit the current width and re-chunked when the
+window is resized. Virtualization then falls out of the vertical panel it already
+had.
+
+Because the list's items are rows in gallery mode, its own selection is
+meaningless there; the tiles report their own. The highlight is refreshed by
+sweeping the realised visuals for tiles tagged with an entry — one screenful of
+work, and unlike a map of tile controls it cannot go stale as rows scroll in and
+out.
+
+One trap worth recording: a `FuncDataTemplate<T>` for a reference type is also
+asked to build when a container is being **cleared**, with a null item. Both
+builders dereferenced it, and the browser crashed the application outright the
+first time a row scrolled out of view.
+
 ### Moving elements between pages
 
 **Page ▸ Move selection to page**, and the same submenu on the context menu,
