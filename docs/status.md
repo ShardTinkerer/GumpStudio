@@ -153,7 +153,7 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 454 tests across the solution; 6 skip when the single-client
+Done. 468 tests across the solution; 6 skip when the single-client
 environment variables are unset, and the client-data theories skip entirely when
 no installation is configured, so CI stays green.
 
@@ -336,6 +336,34 @@ Decoding is serialised through a task chain now, results are cached
 (downscaled to tile size, several hundred of them, so scrolling back costs
 nothing), and a request whose tile has since been recycled is dropped before it
 does any work rather than after.
+
+### Aligning a selection, and the text-entry wash
+
+Two things the original had that the rewrite had dropped, both found by
+comparing against it in use.
+
+**Arrange**, on the Edit menu and the context menu, with the original's six
+alignments — lefts, rights, tops, bottoms, centre horizontally, centre
+vertically — plus equalising horizontal and vertical spacing. Two rules are worth
+stating because they are easy to get subtly wrong and are not what every editor
+does:
+
+- Everything moves **to the anchor**, and the anchor does not move. The anchor is
+  whichever element was last pressed or right-clicked, so right-clicking one of a
+  group and aligning lines the rest up on that one. The alternative — collapsing
+  the whole selection onto its own bounding box — leaves nothing predictable to
+  aim at. When no anchor applies, the frontmost selected element is used.
+- Spacing evens out the **centres**, not the gaps, and the outermost two do not
+  move. With elements of differing sizes even gaps look uneven; even centres do
+  not. Spacing needs three elements, and says so rather than appearing broken
+  with two.
+
+**A text entry is washed translucent yellow again.** The client draws no frame
+for one, so without something the editor draws itself an empty field is
+invisible; the rewrite outlined it in grey, the original filled its bounds with
+`Color.FromArgb(50, Color.Yellow)`. The original reads better — it says "the
+player types here" rather than "there is a box here" — so that is what it does
+now.
 
 ### Moving elements between pages
 

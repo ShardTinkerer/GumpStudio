@@ -226,6 +226,10 @@ public sealed class GumpCanvas : Control, IDisposable
             _session.Canvas.Select(hit);
         }
 
+        // Whatever was right-clicked is what an alignment lines the rest up on,
+        // even when it was already part of the selection.
+        _session.Canvas.Anchor = hit;
+
         InvalidateVisual();
         InteractionChanged?.Invoke(this, EventArgs.Empty);
     }

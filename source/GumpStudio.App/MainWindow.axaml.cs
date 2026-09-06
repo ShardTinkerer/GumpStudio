@@ -12,6 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 using GumpStudio.App.Controls;
 using GumpStudio.Core.Commands;
 using GumpStudio.Core.Document;
+using GumpStudio.Core.Editing;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
 using GumpStudio.Plugins;
@@ -101,6 +102,14 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuDelete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
         Click("MenuGroup", GroupSelection);
         Click("MenuUngroup", UngroupSelection);
+        Click("MenuAlignLeft", () => Arrange(() => _session.Canvas.Align(AlignMode.Left), "Aligned lefts."));
+        Click("MenuAlignRight", () => Arrange(() => _session.Canvas.Align(AlignMode.Right), "Aligned rights."));
+        Click("MenuAlignTop", () => Arrange(() => _session.Canvas.Align(AlignMode.Top), "Aligned tops."));
+        Click("MenuAlignBottom", () => Arrange(() => _session.Canvas.Align(AlignMode.Bottom), "Aligned bottoms."));
+        Click("MenuCentreH", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterHorizontally), "Centred horizontally."));
+        Click("MenuCentreV", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterVertically), "Centred vertically."));
+        Click("MenuSpaceH", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Horizontally), "Spaced horizontally.", 3));
+        Click("MenuSpaceV", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Vertically), "Spaced vertically.", 3));
         Click("MenuBringToFront", () => Reorder(_session.Canvas.BringToFront, "front"));
         Click("MenuBringForward", () => Reorder(_session.Canvas.BringForward, "forward"));
         Click("MenuSendBackward", () => Reorder(_session.Canvas.SendBackward, "backward"));
@@ -192,6 +201,24 @@ public sealed partial class MainWindow : Window, IDisposable
         MenuItem delete = Item("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
         MenuItem moveToPage = new() { Header = "Move to page" };
 
+        MenuItem arrange = new()
+        {
+            Header = "Arrange",
+            ItemsSource = new List<object>
+            {
+                Item("Align lefts", () => Arrange(() => _session.Canvas.Align(AlignMode.Left), "Aligned lefts.")),
+                Item("Align rights", () => Arrange(() => _session.Canvas.Align(AlignMode.Right), "Aligned rights.")),
+                Item("Align tops", () => Arrange(() => _session.Canvas.Align(AlignMode.Top), "Aligned tops.")),
+                Item("Align bottoms", () => Arrange(() => _session.Canvas.Align(AlignMode.Bottom), "Aligned bottoms.")),
+                new Separator(),
+                Item("Centre horizontally", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterHorizontally), "Centred horizontally.")),
+                Item("Centre vertically", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterVertically), "Centred vertically.")),
+                new Separator(),
+                Item("Equalise horizontal spacing", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Horizontally), "Spaced horizontally.", 3)),
+                Item("Equalise vertical spacing", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Vertically), "Spaced vertically.", 3)),
+            },
+        };
+
         ContextMenu menu = new()
         {
             ItemsSource = new List<object>
@@ -207,6 +234,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 backward,
                 back,
                 new Separator(),
+                arrange,
                 moveToPage,
                 new Separator(),
                 delete,
@@ -233,6 +261,7 @@ public sealed partial class MainWindow : Window, IDisposable
             ungroup.IsEnabled = anyGroup;
             front.IsEnabled = forward.IsEnabled = backward.IsEnabled = back.IsEnabled = selected > 0;
             delete.IsEnabled = selected > 0;
+            arrange.IsEnabled = selected >= 2;
 
             FillMoveToPageMenu(moveToPage);
         };
@@ -363,6 +392,35 @@ public sealed partial class MainWindow : Window, IDisposable
 
         RefreshAll();
         SetStatus(dissolved == 1 ? "Ungrouped." : $"Ungrouped {dissolved} groups.");
+    }
+
+    /// <summary>
+    /// Applies an alignment or spacing pass and says what happened.
+    /// </summary>
+    /// <remarks>
+    /// Spacing needs three elements, not two: with two there is nothing between
+    /// them to even out. Saying so beats a command that looks broken.
+    /// </remarks>
+    private void Arrange(Func<bool> operation, string done, int required = 2)
+    {
+        if (_session.Canvas.Selection.Count < required)
+        {
+            SetStatus(required > 2
+                ? "Select at least three elements to space them evenly."
+                : "Select at least two elements to align them.");
+
+            return;
+        }
+
+        if (!operation())
+        {
+            SetStatus("Already arranged.");
+
+            return;
+        }
+
+        RefreshAll();
+        SetStatus(done);
     }
 
     /// <summary>Applies a drawing-order change and says what happened.</summary>

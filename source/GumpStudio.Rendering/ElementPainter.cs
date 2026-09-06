@@ -180,9 +180,14 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
 
     public void Visit(TextEntryElement element)
     {
-        // The client draws no frame for a text entry; the editor needs to show
-        // one or the field would be invisible until it has text.
-        DrawOutline(element.Bounds, new SKColor(0x60, 0x60, 0x60, 0xC0));
+        // The client draws no frame for a text entry, so the editor has to show
+        // the field's extent some other way or an empty one is invisible. A
+        // translucent yellow wash over the bounds is what the original used, and
+        // it reads as "the player can type here" at a glance.
+        using (SKPaint wash = new() { Style = SKPaintStyle.Fill, Color = new SKColor(0xFF, 0xFF, 0x00, 50) })
+        {
+            canvas.DrawRect(ToRect(element.Bounds), wash);
+        }
 
         if (art.GetText(0, element.InitialText, element.Hue) is not { } text)
         {

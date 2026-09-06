@@ -36,6 +36,19 @@
         <MenuItem Header="Bring for_ward" Name="MenuBringForward" InputGesture="Ctrl+Up" />
         <MenuItem Header="Send back_ward" Name="MenuSendBackward" InputGesture="Ctrl+Down" />
         <MenuItem Header="Send to _back" Name="MenuSendToBack" InputGesture="Ctrl+Shift+Down" />
+        <Separator />
+        <MenuItem Header="_Arrange">
+          <MenuItem Header="Align _lefts" Name="MenuAlignLeft" />
+          <MenuItem Header="Align _rights" Name="MenuAlignRight" />
+          <MenuItem Header="Align _tops" Name="MenuAlignTop" />
+          <MenuItem Header="Align _bottoms" Name="MenuAlignBottom" />
+          <Separator />
+          <MenuItem Header="Centre _horizontally" Name="MenuCentreH" />
+          <MenuItem Header="Centre _vertically" Name="MenuCentreV" />
+          <Separator />
+          <MenuItem Header="Equalise horizontal _spacing" Name="MenuSpaceH" />
+          <MenuItem Header="Equalise vertical spa_cing" Name="MenuSpaceV" />
+        </MenuItem>
       </MenuItem>
 
       <MenuItem Header="_View">

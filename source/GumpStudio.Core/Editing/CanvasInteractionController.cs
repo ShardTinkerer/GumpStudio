@@ -16,6 +16,28 @@ public enum InputModifiers
     Extend = 1,
 }
 
+/// <summary>Which edge or axis an alignment lines the selection up on.</summary>
+public enum AlignMode
+{
+    Left,
+    Right,
+    Top,
+    Bottom,
+
+    /// <summary>Matches horizontal centres.</summary>
+    CenterHorizontally,
+
+    /// <summary>Matches vertical centres.</summary>
+    CenterVertically,
+}
+
+/// <summary>Which axis an even-spacing pass works along.</summary>
+public enum DistributeMode
+{
+    Horizontally,
+    Vertically,
+}
+
 /// <summary>
 /// The canvas interaction state machine: selection, dragging, resizing and
 /// marquee selection.
@@ -63,6 +85,24 @@ public sealed class CanvasInteractionController(UndoHistory history)
 
     /// <summary>The design grid. Moving and resizing snap to it when enabled.</summary>
     public GridSettings Grid { get; } = new();
+
+    /// <summary>
+    /// The element the next alignment lines the others up against.
+    /// </summary>
+    /// <remarks>
+    /// Set to whichever element was last pressed or right-clicked, so aligning
+    /// after right-clicking one of a group lines the rest up on that one. This
+    /// is how the original behaved: its alignment commands lived on an element's
+    /// own context menu and used that element as the reference.
+    /// </remarks>
+    public Element? Anchor { get; set; }
+
+    /// <summary>
+    /// The anchor to actually use: the recorded one while it is still selected,
+    /// otherwise the frontmost selected element.
+    /// </summary>
+    private Element? EffectiveAnchor =>
+        Anchor is not null && _selection.Contains(Anchor) ? Anchor : _selection.LastOrDefault();
 
     /// <summary>True while a gesture is in progress.</summary>
     public bool IsDragging => Mode != DragMode.None;
@@ -152,6 +192,7 @@ public sealed class CanvasInteractionController(UndoHistory history)
 
         _primary = hit;
         _primaryStart = hit.Bounds;
+        Anchor = hit;
         Mode = DragMode.Move;
 
         CaptureDragStart();
@@ -503,6 +544,128 @@ public sealed class CanvasInteractionController(UndoHistory history)
 
         return moving.Count;
     }
+
+    /// <summary>
+    /// Lines the selection up against <see cref="Anchor"/>.
+    /// </summary>
+    /// <returns>True when anything moved.</returns>
+    /// <remarks>
+    /// The anchor stays put and everything else moves to it, rather than the
+    /// whole selection collapsing onto its own bounding box. That is what the
+    /// original did, and it is the more predictable of the two: the element you
+    /// clicked is the one that does not move.
+    /// </remarks>
+    public bool Align(AlignMode mode)
+    {
+        if (_selection.Count < 2 || EffectiveAnchor is not { } anchor)
+        {
+            return false;
+        }
+
+        GumpRect target = anchor.Bounds;
+
+        using UndoHistory.CompositeScope scope = history.BeginComposite("Align");
+
+        bool moved = false;
+
+        foreach (Element element in _selection)
+        {
+            if (ReferenceEquals(element, anchor))
+            {
+                continue;
+            }
+
+            GumpPoint from = element.Location;
+            GumpPoint to = mode switch
+            {
+                AlignMode.Left => new GumpPoint(target.X, from.Y),
+                AlignMode.Right => new GumpPoint(target.Right - element.Width, from.Y),
+                AlignMode.Top => new GumpPoint(from.X, target.Y),
+                AlignMode.Bottom => new GumpPoint(from.X, target.Bottom - element.Height),
+                AlignMode.CenterHorizontally =>
+                    new GumpPoint(target.X + ((target.Width - element.Width) / 2), from.Y),
+                _ => new GumpPoint(from.X, target.Y + ((target.Height - element.Height) / 2)),
+            };
+
+            if (to == from)
+            {
+                continue;
+            }
+
+            scope.Run(new MoveElementCommand(element, from, to));
+
+            moved = true;
+        }
+
+        if (moved)
+        {
+            OnChanged();
+        }
+
+        return moved;
+    }
+
+    /// <summary>
+    /// Spaces the selection evenly along one axis.
+    /// </summary>
+    /// <returns>True when anything moved.</returns>
+    /// <remarks>
+    /// Centres are spread evenly between the outermost two, which therefore do
+    /// not move. Spacing by centre rather than by gap is what the original did,
+    /// and it keeps elements of different sizes looking evenly placed rather
+    /// than evenly gapped.
+    /// </remarks>
+    public bool Distribute(DistributeMode mode)
+    {
+        // Two elements are already evenly spaced by definition.
+        if (_selection.Count < 3)
+        {
+            return false;
+        }
+
+        bool horizontal = mode == DistributeMode.Horizontally;
+
+        List<Element> ordered = [.. _selection.OrderBy(e => Centre(e, horizontal))];
+
+        int first = Centre(ordered[0], horizontal);
+        int last = Centre(ordered[^1], horizontal);
+        double step = (last - first) / (double)(ordered.Count - 1);
+
+        using UndoHistory.CompositeScope scope = history.BeginComposite("Distribute");
+
+        bool moved = false;
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            Element element = ordered[i];
+
+            int centre = (int)Math.Round(first + (step * i));
+            GumpPoint from = element.Location;
+            GumpPoint to = horizontal
+                ? new GumpPoint(centre - (element.Width / 2), from.Y)
+                : new GumpPoint(from.X, centre - (element.Height / 2));
+
+            if (to == from)
+            {
+                continue;
+            }
+
+            scope.Run(new MoveElementCommand(element, from, to));
+
+            moved = true;
+        }
+
+        if (moved)
+        {
+            OnChanged();
+        }
+
+        return moved;
+    }
+
+    private static int Centre(Element element, bool horizontal) => horizontal
+        ? element.X + (element.Width / 2)
+        : element.Y + (element.Height / 2);
 
     /// <summary>Deletes the selection.</summary>
     public void DeleteSelection()
