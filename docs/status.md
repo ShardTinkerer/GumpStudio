@@ -233,6 +233,31 @@ Three traps worth recording, all found by using it rather than by reading it:
   shown. The tile records the id it wants and clears it on
   `DetachedFromVisualTree` instead, which distinguishes "gone" from "not arrived".
 
+### Tile size, and a tile that would not take a click
+
+The thumbnail size is a setting, adjustable from the browser's own toolbar and
+remembered between sessions. It applies to both views and defaults to **144
+pixels**, twice what the first version used: large gump art was being scaled down
+so far that recognising a piece meant selecting it and reading the preview. The
+browser window opens wider to suit, so the bigger tiles still give five or six
+columns. Changing the size clears the thumbnail cache, whose bitmaps were scaled
+for the old one, and the cache is bounded by a memory budget rather than a count —
+at 32 pixels a thousand thumbnails are four megabytes, at 320 they are four
+hundred.
+
+Small art is not blown up to fill the tile. Nearest-neighbour upscaling would
+look fine, but it would also make a 9x21 gump and a 300x200 one look the same
+size, and the browser is where you go to find out which is which.
+
+**A tile only responded to clicks on the artwork itself.** An unselected tile was
+painted with no brush at all, and Avalonia does not hit-test a control where
+nothing is drawn — so the empty space around a small piece of art, which is most
+of the tile, silently swallowed the click. The selected tile worked, because its
+highlight gave it something to hit. Unselected tiles are painted
+`Brushes.Transparent` now, which is hit-tested. Confirmed with a hit-test probe
+before and after: the unselected tile reported zero hits at its corner and one
+afterwards.
+
 ### Decoding a screenful without thrashing
 
 A gallery realises about seventy tiles at once where the list realised fourteen,

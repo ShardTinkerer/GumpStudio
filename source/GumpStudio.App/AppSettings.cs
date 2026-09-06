@@ -35,6 +35,13 @@ public sealed class AppSettings
     /// </remarks>
     public bool ArtBrowserGallery { get; set; } = true;
 
+    /// <summary>Side of an art-browser thumbnail, in pixels.</summary>
+    /// <remarks>
+    /// Applies to both views. Large art is scaled down to fit, so a bigger tile
+    /// is the difference between recognising a gump and guessing at it.
+    /// </remarks>
+    public int ArtBrowserTileSize { get; set; } = 144;
+
     /// <summary>Where the settings file lives.</summary>
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

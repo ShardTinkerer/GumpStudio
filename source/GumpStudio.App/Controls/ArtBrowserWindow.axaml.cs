@@ -43,20 +43,18 @@ public enum ArtBrowserKind
 /// </remarks>
 public sealed partial class ArtBrowserWindow : Window
 {
-    /// <summary>Side of a gallery tile's image area, in pixels.</summary>
-    private const int TileSize = 72;
+    /// <summary>Smallest and largest thumbnail the size control offers.</summary>
+    private const int MinTileSize = 32;
+    private const int MaxTileSize = 320;
 
-    /// <summary>Footprint of a gallery tile, image plus caption plus margins.</summary>
-    private const int CellWidth = 84;
-    private const int CellHeight = 100;
-
-    /// <summary>How many decoded thumbnails to keep.</summary>
+    /// <summary>
+    /// Roughly how much memory the thumbnail cache may hold.
+    /// </summary>
     /// <remarks>
-    /// Enough for several screenfuls in either direction. Each is at most
-    /// <see cref="TileSize"/> square, so the whole cache is a handful of
-    /// megabytes.
+    /// A count would be the wrong unit: at 32 pixels a thousand thumbnails are
+    /// four megabytes, and at 320 they are four hundred.
     /// </remarks>
-    private const int ThumbnailCacheLimit = 800;
+    private const int ThumbnailCacheBudget = 24 * 1024 * 1024;
 
     private readonly List<ArtEntry> _all = [];
     private readonly UoDataContext? _data;
@@ -65,6 +63,7 @@ public sealed partial class ArtBrowserWindow : Window
     private readonly TextBox _filter = null!;
     private readonly ListBox _results = null!;
     private readonly ToggleButton _galleryToggle = null!;
+    private readonly NumericUpDown _tileSizeBox = null!;
     private readonly TextBlock _count = null!;
     private readonly TextBlock _previewTitle = null!;
     private readonly TextBlock _previewDetail = null!;
@@ -105,6 +104,7 @@ public sealed partial class ArtBrowserWindow : Window
     private ArtEntry? _selected;
     private Bitmap? _previewBitmap;
     private int _columns = 1;
+    private int _tileSize = 144;
 
     /// <summary>Parameterless constructor for the XAML designer.</summary>
     public ArtBrowserWindow()
@@ -122,6 +122,7 @@ public sealed partial class ArtBrowserWindow : Window
         _filter = this.FindControl<TextBox>("FilterBox")!;
         _results = this.FindControl<ListBox>("Results")!;
         _galleryToggle = this.FindControl<ToggleButton>("GalleryToggle")!;
+        _tileSizeBox = this.FindControl<NumericUpDown>("TileSizeBox")!;
         _count = this.FindControl<TextBlock>("CountText")!;
         _previewTitle = this.FindControl<TextBlock>("PreviewTitle")!;
         _previewDetail = this.FindControl<TextBlock>("PreviewDetail")!;
@@ -146,7 +147,13 @@ public sealed partial class ArtBrowserWindow : Window
         this.FindControl<Button>("AcceptButton")!.Click += (_, _) => Accept();
         this.FindControl<Button>("CancelButton")!.Click += (_, _) => Close();
 
-        _galleryToggle.IsChecked = AppSettings.Load().ArtBrowserGallery;
+        AppSettings settings = AppSettings.Load();
+
+        _tileSize = Math.Clamp(settings.ArtBrowserTileSize, MinTileSize, MaxTileSize);
+        _tileSizeBox.Value = _tileSize;
+        _tileSizeBox.ValueChanged += (_, _) => ApplyTileSize();
+
+        _galleryToggle.IsChecked = settings.ArtBrowserGallery;
 
         ApplyViewMode(remember: false);
         Populate(initialId);
@@ -156,6 +163,14 @@ public sealed partial class ArtBrowserWindow : Window
     public int? SelectedId { get; private set; }
 
     private bool IsGallery => _galleryToggle.IsChecked == true;
+
+    /// <summary>Footprint of a gallery tile: the image, its caption and margins.</summary>
+    private int CellWidth => _tileSize + 12;
+
+    private int CellHeight => _tileSize + 28;
+
+    private int ThumbnailCacheLimit =>
+        Math.Max(64, ThumbnailCacheBudget / (_tileSize * _tileSize * 4));
 
     private void Populate(int initialId)
     {
@@ -233,6 +248,40 @@ public sealed partial class ArtBrowserWindow : Window
 
             AppSettings.Save(settings);
         }
+    }
+
+    /// <summary>Applies a new thumbnail size and rebuilds what is on screen.</summary>
+    /// <remarks>
+    /// The cache is dropped rather than reused: its bitmaps were scaled to the
+    /// old size, and reusing them would leave every tile either blurry or
+    /// bordered by dead space until it happened to be decoded again.
+    /// </remarks>
+    private void ApplyTileSize()
+    {
+        int requested = Math.Clamp((int)(_tileSizeBox.Value ?? _tileSize), MinTileSize, MaxTileSize);
+
+        if (requested == _tileSize)
+        {
+            return;
+        }
+
+        _tileSize = requested;
+
+        _thumbnails.Clear();
+        _thumbnailOrder.Clear();
+
+        Rebind();
+
+        if (_selected is not null)
+        {
+            ScrollTo(_selected);
+        }
+
+        AppSettings settings = AppSettings.Load();
+
+        settings.ArtBrowserTileSize = _tileSize;
+
+        AppSettings.Save(settings);
     }
 
     private void ApplyFilter()
@@ -332,7 +381,7 @@ public sealed partial class ArtBrowserWindow : Window
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            Height = 44,
+            Height = _tileSize + 4,
         };
 
         if (entry is null)
@@ -340,7 +389,7 @@ public sealed partial class ArtBrowserWindow : Window
             return row;
         }
 
-        row.Children.Add(BuildThumbnail(entry, 40));
+        row.Children.Add(BuildThumbnail(entry, _tileSize));
         row.Children.Add(new TextBlock
         {
             Text = entry.Display,
@@ -373,7 +422,7 @@ public sealed partial class ArtBrowserWindow : Window
     {
         StackPanel content = new() { Spacing = 2 };
 
-        content.Children.Add(BuildThumbnail(entry, TileSize));
+        content.Children.Add(BuildThumbnail(entry, _tileSize));
         content.Children.Add(new TextBlock
         {
             Text = entry.Id.ToString(CultureInfo.InvariantCulture),
@@ -450,10 +499,25 @@ public sealed partial class ArtBrowserWindow : Window
         return thumbnail;
     }
 
+    /// <summary>
+    /// Shows whether a tile is the selected one.
+    /// </summary>
+    /// <remarks>
+    /// An unselected tile is painted <see cref="Brushes.Transparent"/> rather
+    /// than left with no brush at all. A null background is not hit-tested, so
+    /// only the artwork and the caption were clickable and the empty space
+    /// around a small piece of art — most of the tile — quietly swallowed the
+    /// click.
+    /// </remarks>
     private static void Paint(Border tile, bool selected)
     {
-        tile.Background = selected ? new SolidColorBrush(Color.FromArgb(0x60, 0x33, 0x99, 0xFF)) : null;
-        tile.BorderBrush = selected ? new SolidColorBrush(Color.FromRgb(0x33, 0x99, 0xFF)) : Brushes.Transparent;
+        tile.Background = selected
+            ? new SolidColorBrush(Color.FromArgb(0x60, 0x33, 0x99, 0xFF))
+            : Brushes.Transparent;
+
+        tile.BorderBrush = selected
+            ? new SolidColorBrush(Color.FromRgb(0x33, 0x99, 0xFF))
+            : Brushes.Transparent;
     }
 
     private void OnListSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -575,7 +639,8 @@ public sealed partial class ArtBrowserWindow : Window
     /// Caching the full-size decode would be far more memory than it is worth: a
     /// single 300x200 gump is a quarter of a megabyte, and the cache holds
     /// hundreds. Nearest-neighbour sampling matches how the tile would have been
-    /// drawn anyway, so nothing changes on screen.
+    /// drawn anyway, so nothing changes on screen. Art smaller than the tile is
+    /// left alone rather than blown up, so its true size stays readable.
     /// </remarks>
     private Bitmap? DecodeThumbnail(int id)
     {
@@ -590,12 +655,12 @@ public sealed partial class ArtBrowserWindow : Window
 
         int longest = Math.Max(decoded.Width, decoded.Height);
 
-        if (longest <= TileSize)
+        if (longest <= _tileSize)
         {
             return Encode(decoded);
         }
 
-        double scale = (double)TileSize / longest;
+        double scale = (double)_tileSize / longest;
 
         using SKBitmap scaled = decoded.Resize(
             new SKImageInfo(
