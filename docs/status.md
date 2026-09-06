@@ -198,6 +198,29 @@ property panel showing "Nothing selected". The list rebuilt its item source on
 every refresh, and the resulting selection-reset event raced the suppression
 flag. It now rebuilds only when the page contents actually change.
 
+### Panels that can be resized, and a scroll bar that stays out of the way
+
+Reported: the element list and the property panel clip their contents, and the
+property panel's scroll bar sits on top of the browse button at the end of an id
+row.
+
+Both side panels were fixed widths docked in a `DockPanel`, so nothing could be
+widened when its contents did not fit — not even by maximising the window, since
+the extra space all went to the canvas. They are grid columns with
+`GridSplitter`s now, each with a minimum width so a panel cannot be dragged away
+entirely, and the element list and property panel have a splitter between them
+too. The inspector starts at 340 rather than 300.
+
+The overlap was Fluent's floating scroll bar: it is drawn **over** the content it
+scrolls rather than beside it, so it landed on the `…` button of a gump- or
+item-id row — the one control in the panel that sits hard against the right
+edge. The property scroller sets `AllowAutoHide="False"` and the content carries
+a matching right margin, so the bar has a gutter of its own.
+
+The properties header moved inside the scrolling row rather than occupying a row
+of its own: a splitter resizes the rows on either side of it, and an `Auto`
+header between them would have been the thing that got resized.
+
 ### The art browsers as a tile gallery
 
 Both browsers now open as a grid of thumbnails, with a **Gallery** toggle back to

@@ -65,52 +65,95 @@
       <TextBlock Name="StatusText" Foreground="#C8C8C8" Text="Ready." />
     </Border>
 
-    <!-- Toolbox -->
-    <Border DockPanel.Dock="Left" Width="150" Background="#26262A" Padding="6">
-      <DockPanel>
-        <TextBlock DockPanel.Dock="Top" Text="Toolbox" Foreground="#9A9AA0"
-                   FontWeight="Bold" Margin="2,2,2,6" />
-        <ItemsControl Name="Toolbox">
-          <ItemsControl.ItemsPanel>
-            <ItemsPanelTemplate>
-              <StackPanel Spacing="3" />
-            </ItemsPanelTemplate>
-          </ItemsControl.ItemsPanel>
-        </ItemsControl>
-      </DockPanel>
-    </Border>
+    <!--
+      Both side panels were fixed widths in a DockPanel, so nothing could be
+      widened when its contents did not fit. They are grid columns with
+      splitters now, each with a minimum so a panel cannot be dragged away
+      entirely.
+    -->
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="150" MinWidth="110" />
+        <ColumnDefinition Width="4" />
+        <ColumnDefinition Width="*" MinWidth="200" />
+        <ColumnDefinition Width="4" />
+        <ColumnDefinition Width="340" MinWidth="240" />
+      </Grid.ColumnDefinitions>
 
-    <!-- Element tree and properties -->
-    <Border DockPanel.Dock="Right" Width="300" Background="#26262A" Padding="6">
-      <Grid RowDefinitions="Auto,2*,Auto,3*">
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,6" Spacing="6">
-          <TextBlock Text="Elements" Foreground="#9A9AA0" FontWeight="Bold" />
-          <!-- Drawing order is the list order, and it is not obvious which end
-               is which until something is hidden behind something else. -->
-          <TextBlock Text="back → front" Foreground="#6A6A70" VerticalAlignment="Center" />
-        </StackPanel>
+      <!-- Toolbox -->
+      <Border Grid.Column="0" Background="#26262A" Padding="6">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="Toolbox" Foreground="#9A9AA0"
+                     FontWeight="Bold" Margin="2,2,2,6" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl Name="Toolbox">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Spacing="3" />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+            </ItemsControl>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
 
-        <ListBox Grid.Row="1" Name="ElementList" Background="#1F1F23" />
+      <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="#1F1F23" />
 
-        <TextBlock Grid.Row="2" Text="Properties" Foreground="#9A9AA0"
-                   FontWeight="Bold" Margin="2,10,2,6" />
+      <!-- Pages + canvas -->
+      <DockPanel Grid.Column="2">
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="PageTabs"
+                    Background="#26262A" Spacing="2" />
 
-        <ScrollViewer Grid.Row="3">
-          <StackPanel Name="PropertyPanel" Spacing="4" />
+        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+          <controls:GumpCanvas Name="Canvas" Width="1024" Height="768"
+                               HorizontalAlignment="Left" VerticalAlignment="Top" />
         </ScrollViewer>
-      </Grid>
-    </Border>
+      </DockPanel>
 
-    <!-- Pages + canvas -->
-    <DockPanel>
-      <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="PageTabs"
-                  Background="#26262A" Spacing="2" />
+      <GridSplitter Grid.Column="3" ResizeDirection="Columns" Background="#1F1F23" />
 
-      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-        <controls:GumpCanvas Name="Canvas" Width="1024" Height="768"
-                             HorizontalAlignment="Left" VerticalAlignment="Top" />
-      </ScrollViewer>
-    </DockPanel>
+      <!-- Element list and properties -->
+      <Border Grid.Column="4" Background="#26262A" Padding="6">
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" MinHeight="70" />
+            <RowDefinition Height="4" />
+            <!-- The properties header lives inside this row rather than in one
+                 of its own: a splitter resizes the rows either side of it, and
+                 an Auto header between them would be what got resized. -->
+            <RowDefinition Height="2*" MinHeight="120" />
+          </Grid.RowDefinitions>
+
+          <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,6" Spacing="6">
+            <TextBlock Text="Elements" Foreground="#9A9AA0" FontWeight="Bold" />
+            <!-- Drawing order is the list order, and it is not obvious which end
+                 is which until something is hidden behind something else. -->
+            <TextBlock Text="back → front" Foreground="#6A6A70" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <ListBox Grid.Row="1" Name="ElementList" Background="#1F1F23" />
+
+          <GridSplitter Grid.Row="2" ResizeDirection="Rows" Background="#1F1F23" />
+
+          <DockPanel Grid.Row="3">
+            <TextBlock DockPanel.Dock="Top" Text="Properties" Foreground="#9A9AA0"
+                       FontWeight="Bold" Margin="2,8,2,6" />
+
+            <!--
+              AllowAutoHide off, and a right margin on the content to match.
+              The Fluent scroll bar floats over what it is scrolling by default,
+              which put it on top of the browse button at the end of an id row.
+            -->
+            <ScrollViewer AllowAutoHide="False"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Name="PropertyPanel" Spacing="4" Margin="0,0,10,0" />
+            </ScrollViewer>
+          </DockPanel>
+        </Grid>
+      </Border>
+    </Grid>
 
   </DockPanel>
 </Window>
