@@ -47,7 +47,7 @@ public class PluginLoaderTests
 
         plugin.Instance!.Initialize(host);
 
-        IGumpExporter exporter = Assert.Single(host.Exporters);
+        IGumpExporter exporter = host.Exporters[0];
 
         // Producing output proves the contract types resolved to the host's copies
         // rather than duplicates loaded into the plugin's own context.

@@ -322,9 +322,12 @@ public class PolExportTests
 
         Assert.Equal("gumpstudio.exporters.pol", plugin.Info.Id);
 
-        Core.Export.IGumpExporter exporter = Assert.Single(host.Exporters);
+        // Both dialects are registered; until they were, the layout-string form
+        // could not be reached from the application at all.
+        Assert.Equal(["pol", "pol-layout"], host.Exporters.Select(e => e.Id));
 
-        Assert.Equal("pol", exporter.Id);
+        Core.Export.IGumpExporter exporter = host.Exporters[0];
+
         Assert.Equal(".src", exporter.FileExtension);
         Assert.Contains(
             "GFCreateGump",

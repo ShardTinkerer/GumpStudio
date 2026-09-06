@@ -122,6 +122,29 @@ across the whole document, so a second page whose first radio matched the
 previous page's group never got its `group` command and every radio on it
 silently fell into group 0.
 
+## What each exporter can express
+
+Six formats ship. Two are raw layout syntax and can say everything the client
+understands; the rest are fixed APIs with gaps.
+
+| Format | Coverage |
+|---|---|
+| `pol-layout` | Everything. Raw layout strings. |
+| `sphere-056` | Everything. Raw layout strings. |
+| `pol` | The original element set. The rest is commented out beside the closest call. |
+| `runuo` / `runuo-numeric` | Everything except `tilepicasgumppic`, which no core exposes. `AddPicInPic`, `AddMasterGump`, `AddECHandleInput` and `AddLabelCropped` need a ServUO-era core. |
+| `sphere-099` | A fixed set of script functions. See below. |
+
+Where an exporter is missing only a *refinement* — a partial hue, a crop
+rectangle, a tile overlay on a button — it emits the nearest thing it does have
+and notes what was lost. Dropping the whole command instead would delete a
+visible element from the gump, which is a far worse answer than drawing it
+slightly wrong. A button whose tile overlay cannot be expressed is still a
+button; commented out, it is a dialog the player cannot dismiss.
+
+Where nothing comes close — `picinpic`, `tilepicasgumppic`, `tooltip` — the
+command is written as a comment rather than as a call that would not run.
+
 ## What the POL gump package cannot express
 
 The `:gumps:gumps` distro package has a `GF*` function for the original element

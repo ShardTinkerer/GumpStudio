@@ -2,6 +2,7 @@ using System.Globalization;
 
 using GumpStudio.Core.Document;
 using GumpStudio.Core.Elements;
+using GumpStudio.Core.Export;
 using GumpStudio.Core.Legacy;
 using GumpStudio.Core.Primitives;
 using GumpStudio.Core.Serialization;
@@ -244,7 +245,30 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Exports a document as a POL script.</summary>
+    /// <summary>Every exporter the CLI can drive, by the id it is named with.</summary>
+    /// <remarks>
+    /// The application discovers these from disk through the plugin loader. The
+    /// CLI references them directly instead: it is a build-time tool, and going
+    /// through an <c>AssemblyLoadContext</c> would buy it nothing.
+    /// </remarks>
+    private static readonly Dictionary<string, Func<IGumpExporter>> Exporters =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["pol"] = () => new GumpStudio.Plugins.Pol.PolExporter(
+                GumpStudio.Plugins.Pol.PolScriptStyle.GumpPackage),
+            ["pol-layout"] = () => new GumpStudio.Plugins.Pol.PolExporter(
+                GumpStudio.Plugins.Pol.PolScriptStyle.LayoutStrings),
+            ["runuo"] = () => new GumpStudio.Plugins.RunUo.RunUoExporter(
+                GumpStudio.Plugins.RunUo.RunUoButtonIdStyle.Named),
+            ["runuo-numeric"] = () => new GumpStudio.Plugins.RunUo.RunUoExporter(
+                GumpStudio.Plugins.RunUo.RunUoButtonIdStyle.Numeric),
+            ["sphere-056"] = () => new GumpStudio.Plugins.Sphere.SphereExporter(
+                GumpStudio.Plugins.Sphere.SphereDialect.Revision),
+            ["sphere-099"] = () => new GumpStudio.Plugins.Sphere.SphereExporter(
+                GumpStudio.Plugins.Sphere.SphereDialect.Modern),
+        };
+
+    /// <summary>Exports a document as a server-side script.</summary>
     private static int Export(string[] args)
     {
         if (ParseOptions(args) is not { } options || options.Input is null)
@@ -252,25 +276,23 @@ internal static class Program
             return Fail("export requires --in <file.gump>.");
         }
 
+        string format = options.Format ?? "pol";
+
+        if (!Exporters.TryGetValue(format, out Func<IGumpExporter>? create))
+        {
+            return Fail(
+                $"Unknown format '{format}'. Available: {string.Join(", ", Exporters.Keys.Order(StringComparer.Ordinal))}.");
+        }
+
         GumpDocument document = IsXml(options.Input)
             ? GumpXmlSerializer.Load(options.Input)
             : LegacyGumpImporter.ImportDocument(options.Input);
 
-        GumpStudio.Plugins.Pol.PolExporter exporter = new();
-
-        if (options.Style is { } style)
-        {
-            exporter.Options = exporter.Options with
-            {
-                Style = string.Equals(style, "layout", StringComparison.OrdinalIgnoreCase)
-                    ? GumpStudio.Plugins.Pol.PolScriptStyle.LayoutStrings
-                    : GumpStudio.Plugins.Pol.PolScriptStyle.GumpPackage,
-            };
-        }
+        IGumpExporter exporter = create();
 
         string script = exporter.Export(
             document,
-            new GumpStudio.Core.Export.GumpExportOptions
+            new GumpExportOptions
             {
                 GumpName = options.Name ?? "MyGump",
             });
@@ -348,8 +370,8 @@ internal static class Program
                     i++;
                     break;
 
-                case "--style" when value is not null:
-                    options = options with { Style = value };
+                case "--format" when value is not null:
+                    options = options with { Format = value };
                     i++;
                     break;
 
@@ -396,7 +418,15 @@ internal static class Program
                               [--hue <n>] [--partial-hue] [--out <file.png>]
               gumpstudio render --client <path> --in <file.gump> [--page <n>] [--out <file.png>]
               gumpstudio sample [--out <file.gump>]
-              gumpstudio export --in <file.gump> [--style pkg|layout] [--name <n>] [--out <file.src>]
+              gumpstudio export --in <file.gump> [--format <id>] [--name <n>] [--out <file>]
+
+            Export formats:
+              pol            POL gump-package calls (the default)
+              pol-layout     POL layout strings
+              runuo          RunUO / ServUO C# gump, named button ids
+              runuo-numeric  RunUO / ServUO C# gump, numeric button ids
+              sphere-056     Sphere 0.56 / Revisions
+              sphere-099     Sphere 0.99 / 1.0
 
             Ids accept decimal or 0x-prefixed hexadecimal.
             Hues are one-based, matching the values gump scripts use; 0 means none.
@@ -415,6 +445,6 @@ internal static class Program
         string? Output,
         string? Input = null,
         int Page = 0,
-        string? Style = null,
+        string? Format = null,
         string? Name = null);
 }

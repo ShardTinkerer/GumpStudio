@@ -29,7 +29,10 @@ GumpStudio.Plugins.Abstractions
 GumpStudio.App           Avalonia MVVM shell.
 GumpStudio.Cli           Headless tooling: dump art, convert files, run
                          exporters without the UI.
-GumpStudio.Plugins.Pol   POL exporter, the only shipped exporter.
+GumpStudio.Plugins.Pol   POL exporter, in both of its dialects.
+GumpStudio.Plugins.RunUo RunUO / ServUO C# gump exporter.
+GumpStudio.Plugins.Sphere
+                         Sphere exporter, 0.56 and 0.99 dialects.
 ```
 
 Tests live in `tests/`, with `GumpStudio.TestSupport` holding the fixtures and

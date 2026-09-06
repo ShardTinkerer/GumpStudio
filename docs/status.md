@@ -33,7 +33,7 @@ serve as the behaviour reference where the existing port looks wrong.
 | Legacy `.gump` | Read-only importer via `System.Formats.Nrbf`; `BinaryFormatter` is never enabled |
 | Client data | `.mul` **and** `.uop` |
 | Plugins | External-DLL model kept, but the contract is UI-agnostic |
-| Exporters | POL, plus RunUO and Sphere gump export. The RunUO *importer* and Wolfpack stay dropped |
+| Exporters | POL, RunUO and Sphere, in two dialects each. The RunUO *importer* and Wolfpack stay dropped |
 
 ## Phase 0 — Foundation ✅
 
@@ -153,7 +153,7 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 368 tests across the solution; 6 skip when the single-client
+Done. 430 tests across the solution; 6 skip when the single-client
 environment variables are unset, and the client-data theories skip entirely when
 no installation is configured, so CI stays green.
 
@@ -259,7 +259,7 @@ elements before `page 1` already expresses the same thing.
 
 Done ahead of Phase 4, because the plugin contract is UI-agnostic by design and
 therefore does not need the shell. Doing it first means the shell can wire up a
-real exporter rather than a stub. 20 tests in `GumpStudio.Plugins.Pol.Tests`.
+real exporter rather than a stub. 43 tests in `GumpStudio.Plugins.Pol.Tests`.
 
 - `IGumpStudioPlugin` / `IPluginHost` carry no UI type at all. Menu
   contributions are declarative descriptors the shell renders, so a plugin never
@@ -428,6 +428,55 @@ parser, the POL command reference and RunUO, which agree with each other:
 - **No `endgroup` was ever emitted**, so any radio placed after the last group on
   a page silently joined it.
 
+## The RunUO and Sphere exporters
+
+Both were dropped from the original plan and put back at the user's request.
+They are ported now, as `GumpStudio.Plugins.RunUo` and
+`GumpStudio.Plugins.Sphere`, each registering two exporters.
+
+Every exporter now offers both of its dialects as separate menu entries rather
+than hiding one behind a modal options dialog the plugin builds itself. That also
+closed a gap in the POL plugin: it registered only the gump-package dialect, so
+**the layout-string form could not be reached from the application at all**.
+
+Six entries in all: `pol`, `pol-layout`, `runuo`, `runuo-numeric`,
+`sphere-056`, `sphere-099`. `gumpstudio export --format <id>` drives the same
+set from the command line.
+
+### What the originals got wrong
+
+Each carried the nested-group coordinate defect and locale-sensitive number
+formatting, like the POL one. On top of that:
+
+**RunUO**
+
+- **The command form did not compile.** Its static command handler assigned
+  `e.Mobile` to an *instance* field, which is a compile error in C#. Anyone who
+  ticked "command call" got source that would not build.
+- **Text was escaped for the wrong kind of string literal.** It emitted verbatim
+  literals (`@"…"`) but escaped quotes as `\"`, which is a syntax error inside
+  one. A label containing a quote produced source that would not build.
+- **Checkboxes and radios were mixed into the button enum.** Their switch ids
+  went into the same `Buttons` enum as button ids and got `case` labels in the
+  `info.ButtonID` switch — where a checkbox never appears, and where its id
+  could collide with a real button's. Switch ids and button ids are separate
+  namespaces and are kept apart now.
+- **The named style discarded the author's response ids.** Enum members had no
+  values, so a button's `Param` was replaced by the member's ordinal. Members
+  carry their `Param` explicitly now.
+- **Element names were only stripped of spaces**, so anything else
+  non-alphanumeric produced an invalid identifier. Names are reduced to valid
+  identifiers and de-duplicated.
+
+**Sphere**
+
+- **Checkboxes and radios had their two graphics the wrong way round.** The
+  layout command takes the released id first; the original emitted the checked
+  id first, so every checkbox and radio in a generated dialog rendered inverted.
+- **Every button closed the dialog.** The quit flag was hard-coded to 1, so a
+  page button dismissed the gump instead of switching page.
+- **Radio groups leaked across pages**, the same defect the POL exporter had.
+
 ## The 1.8r3 binaries
 
 `external/` holds both `Gumpstudio1.8r2` and `Gumpstudio1.8r3`. r3 was checked
@@ -462,6 +511,7 @@ and r2 remains the behaviour reference.**
   for every project, reproducibly, including for a one-file xunit.v3 project in
   an empty directory. `eng/run-tests.ps1` launches the test applications
   directly instead. Retry `dotnet test` after an SDK bump.
-- **The RunUO and Sphere exporters are not ported yet.** They were dropped from
-  the original plan and put back at the user's request; the element types they
-  need now exist, so they are the next piece of work.
+- **No exporter has an options dialog.** Class name, namespace and comment
+  settings come from the file name and defaults. Each dialect is a separate menu
+  entry, which covers the choice that actually matters, but the rest is not
+  reachable from the UI — only from the CLI and the API.

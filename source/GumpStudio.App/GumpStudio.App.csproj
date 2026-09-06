@@ -36,6 +36,14 @@
                       ReferenceOutputAssembly="false"
                       Private="false"
                       OutputItemType="PluginBuildOutput" />
+    <ProjectReference Include="../GumpStudio.Plugins.RunUo/GumpStudio.Plugins.RunUo.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false"
+                      OutputItemType="PluginBuildOutput" />
+    <ProjectReference Include="../GumpStudio.Plugins.Sphere/GumpStudio.Plugins.Sphere.csproj"
+                      ReferenceOutputAssembly="false"
+                      Private="false"
+                      OutputItemType="PluginBuildOutput" />
   </ItemGroup>
 
   <Target Name="CopyPluginsToOutput" AfterTargets="Build">

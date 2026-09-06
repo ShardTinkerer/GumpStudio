@@ -8,9 +8,9 @@ on Windows, Linux and macOS. It reads both classic `.mul` and modern `.uop`
 client data, so it works with clients from 2001 through to current.
 
 > **Status: alpha.** The editor is usable — you can place elements, edit their
-> properties, save, and export POL scripts — but several conveniences from the
-> old application are not built yet. See [docs/status.md](docs/status.md) for
-> exactly what is and is not done.
+> properties, save, and export to POL, RunUO and Sphere — but several
+> conveniences from the old application are not built yet. See
+> [docs/status.md](docs/status.md) for exactly what is and is not done.
 
 ## Why a rewrite
 
@@ -53,9 +53,14 @@ gumpstudio dump --client "C:/path/to/UO" --item 0x0E75 --hue 33 --out pack.png
 # Render a saved document with real client art
 gumpstudio render --client "C:/path/to/UO" --in mygump.gump --out mygump.png
 
-# Export a POL script
-gumpstudio export --in mygump.gump --name MyGump --style pkg
+# Export a server script
+gumpstudio export --in mygump.gump --name MyGump --format pol
+gumpstudio export --in mygump.gump --name MyGump --format runuo --out MyGump.cs
+gumpstudio export --in mygump.gump --name d_shop --format sphere-056 --out d_shop.scp
 ```
+
+Six formats are available: `pol`, `pol-layout`, `runuo`, `runuo-numeric`,
+`sphere-056` and `sphere-099`. Run `gumpstudio` with no arguments for the list.
 
 ## Repository layout
 
@@ -90,7 +95,9 @@ Melanius, and several ideas were contributed by the RunUO community. Thanks go
 to DarkStorm of the Wolfpack emulator for help decoding `unifont.mul`.
 
 The POL exporter derives from work by Fernando Rozenblit, itself based on the
-Sphere exporter by Francesco Furiani and Mark Chandler.
+Sphere exporter by Francesco Furiani and Mark Chandler. The Sphere exporter is a
+port of Francesco Furiani's, and the RunUO exporter of roadmaster / Mark
+Sweetman's, itself based on Daegon / Eric Brown's.
 
 The `.uop` container and its Burrows-Wheeler stage were understood with
 reference to the [ClassicUO](https://github.com/ClassicUO/ClassicUO) project

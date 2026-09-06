@@ -11,6 +11,8 @@
 
   <Folder Name="/source/plugins/">
     <Project Path="source/GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj" />
+    <Project Path="source/GumpStudio.Plugins.RunUo/GumpStudio.Plugins.RunUo.csproj" />
+    <Project Path="source/GumpStudio.Plugins.Sphere/GumpStudio.Plugins.Sphere.csproj" />
   </Folder>
 
   <Folder Name="/tests/">
@@ -19,6 +21,8 @@
     <Project Path="tests/GumpStudio.Core.Tests/GumpStudio.Core.Tests.csproj" />
     <Project Path="tests/GumpStudio.Rendering.Tests/GumpStudio.Rendering.Tests.csproj" />
     <Project Path="tests/GumpStudio.Plugins.Pol.Tests/GumpStudio.Plugins.Pol.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Plugins.RunUo.Tests/GumpStudio.Plugins.RunUo.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Plugins.Sphere.Tests/GumpStudio.Plugins.Sphere.Tests.csproj" />
   </Folder>
 
   <Folder Name="/solution items/">
