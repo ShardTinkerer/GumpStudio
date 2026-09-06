@@ -45,6 +45,23 @@
     <!-- Results -->
     <Border BorderBrush="#40FFFFFF" BorderThickness="1">
       <ListBox Name="Results" SelectionMode="Single">
+
+        <!-- In gallery mode a list item is a whole row of tiles, so the row's
+             own hover and selection highlight spans seven unrelated pieces of
+             art and reads as if all of them were picked. The tiles draw their
+             own. -->
+        <ListBox.Styles>
+          <Style Selector="ListBox.gallery ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+          </Style>
+          <Style Selector="ListBox.gallery ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+          </Style>
+          <Style Selector="ListBox.gallery ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+          </Style>
+        </ListBox.Styles>
+
         <ListBox.ItemsPanel>
           <ItemsPanelTemplate>
             <VirtualizingStackPanel Orientation="Vertical" />

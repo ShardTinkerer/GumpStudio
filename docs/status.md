@@ -217,10 +217,36 @@ sweeping the realised visuals for tiles tagged with an entry — one screenful o
 work, and unlike a map of tile controls it cannot go stale as rows scroll in and
 out.
 
-One trap worth recording: a `FuncDataTemplate<T>` for a reference type is also
-asked to build when a container is being **cleared**, with a null item. Both
-builders dereferenced it, and the browser crashed the application outright the
-first time a row scrolled out of view.
+Three traps worth recording, all found by using it rather than by reading it:
+
+- A `FuncDataTemplate<T>` for a reference type is also asked to build when a
+  container is being **cleared**, with a null item. Both builders dereferenced
+  it, and the browser crashed the application outright the first time a row
+  scrolled out of view.
+- A row built for that null item measured **zero height**, and the virtualizing
+  panel estimates its extent from the rows it has seen — so one such row was
+  enough to make it stack later rows on top of each other. Rows carry an explicit
+  height now.
+- Testing "is this control still on screen?" to discard stale work also discards
+  work for a control that is *not on screen yet*, which is every control at the
+  moment its template runs. That threw away every thumbnail before it could be
+  shown. The tile records the id it wants and clears it on
+  `DetachedFromVisualTree` instead, which distinguishes "gone" from "not arrived".
+
+### Decoding a screenful without thrashing
+
+A gallery realises about seventy tiles at once where the list realised fourteen,
+and the first version fired that many decodes concurrently. That was much worse
+than it looks: the UOP reader memoises exactly **one** decompressed entry, and
+reading a gump takes two passes over it — one for its dimensions, one for its
+pixels. Run in parallel, every thread evicts every other thread's memo, so each
+gump inflated and Burrows-Wheeler-decoded twice instead of once, on a flooded
+thread pool. Art arrived slowly, out of order, and sometimes not at all.
+
+Decoding is serialised through a task chain now, results are cached
+(downscaled to tile size, several hundred of them, so scrolling back costs
+nothing), and a request whose tile has since been recycled is dropped before it
+does any work rather than after.
 
 ### Moving elements between pages
 

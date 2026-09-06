@@ -50,6 +50,14 @@ public sealed partial class ArtBrowserWindow : Window
     private const int CellWidth = 84;
     private const int CellHeight = 100;
 
+    /// <summary>How many decoded thumbnails to keep.</summary>
+    /// <remarks>
+    /// Enough for several screenfuls in either direction. Each is at most
+    /// <see cref="TileSize"/> square, so the whole cache is a handful of
+    /// megabytes.
+    /// </remarks>
+    private const int ThumbnailCacheLimit = 800;
+
     private readonly List<ArtEntry> _all = [];
     private readonly UoDataContext? _data;
     private readonly ArtBrowserKind _kind;
@@ -61,6 +69,37 @@ public sealed partial class ArtBrowserWindow : Window
     private readonly TextBlock _previewTitle = null!;
     private readonly TextBlock _previewDetail = null!;
     private readonly Image _preview = null!;
+
+    /// <summary>
+    /// Decoded thumbnails, so scrolling back over art costs nothing.
+    /// </summary>
+    /// <remarks>
+    /// Only ever touched from the UI thread, which is why it needs no lock.
+    /// Entries are dropped rather than disposed: an evicted bitmap may still be
+    /// on screen, and disposing one out from under a realised <see cref="Image"/>
+    /// tears a hole in the panel.
+    /// </remarks>
+    private readonly Dictionary<int, Bitmap> _thumbnails = [];
+    private readonly Queue<int> _thumbnailOrder = new();
+
+    /// <summary>
+    /// Serialises decoding, one image at a time.
+    /// </summary>
+    /// <value>
+    /// The tail of the queue: each request continues from the previous one.
+    /// Only ever read and written on the UI thread, so it needs no lock, and
+    /// unlike a semaphore it is not something the window has to dispose.
+    /// </value>
+    /// <remarks>
+    /// A gallery realises a whole screenful of tiles at once — seventy or so —
+    /// and firing that many decodes concurrently is worse than useless. The UOP
+    /// reader memoises exactly one decompressed entry, and reading a gump takes
+    /// two passes over it: one for its dimensions and one for its pixels.
+    /// Running them in parallel means every thread evicts every other thread's
+    /// memo, so each gump inflates and Burrows-Wheeler-decodes twice instead of
+    /// once, on a flooded thread pool.
+    /// </remarks>
+    private Task _decodeQueue = Task.CompletedTask;
 
     private List<ArtEntry> _matches = [];
     private ArtEntry? _selected;
@@ -95,9 +134,12 @@ public sealed partial class ArtBrowserWindow : Window
 
         _filter.TextChanged += (_, _) => ApplyFilter();
 
-        // Re-chunking on resize is what keeps a gallery filling the window
-        // instead of leaving a ragged column of empty space.
+        // Re-chunking is what keeps a gallery filling the window instead of
+        // leaving a ragged column of empty space. LayoutUpdated as well as
+        // SizeChanged, because the first chunking happens in this constructor,
+        // when the panel has no width yet and every row would hold one tile.
         _results.SizeChanged += (_, _) => ReflowIfNeeded();
+        _results.LayoutUpdated += (_, _) => ReflowIfNeeded();
 
         _galleryToggle.IsCheckedChanged += (_, _) => ApplyViewMode(remember: true);
 
@@ -173,6 +215,8 @@ public sealed partial class ArtBrowserWindow : Window
 
             _results.SelectionMode = SelectionMode.Single;
         }
+
+        _results.Classes.Set("gallery", IsGallery);
 
         Rebind();
 
@@ -307,9 +351,15 @@ public sealed partial class ArtBrowserWindow : Window
     }
 
     /// <inheritdoc cref="BuildListRow" />
+    /// <remarks>
+    /// The height is fixed rather than left to the contents. A row built for a
+    /// null item would otherwise measure zero, and the virtualizing panel
+    /// estimates its extent from the rows it has seen — so one zero-height row
+    /// is enough to make it place later rows on top of each other.
+    /// </remarks>
     private StackPanel BuildGalleryRow(ArtEntry[]? entries)
     {
-        StackPanel row = new() { Orientation = Orientation.Horizontal };
+        StackPanel row = new() { Orientation = Orientation.Horizontal, Height = CellHeight };
 
         foreach (ArtEntry entry in entries ?? [])
         {
@@ -369,14 +419,33 @@ public sealed partial class ArtBrowserWindow : Window
             Height = size,
             Stretch = Stretch.Uniform,
             StretchDirection = StretchDirection.DownOnly,
+
+            // Records which id this control is waiting for, so a decode that
+            // finishes after the control has been reused for another entry can
+            // be recognised as stale and dropped.
+            Tag = entry.Id,
         };
+
+        // Scrolled out of view: whatever was queued for it is now wasted work.
+        // Clearing the tag is what tells the queue to skip it, and it has to be
+        // this rather than an attachment test — a freshly built control is not
+        // in the tree yet either, and testing attachment up front threw away
+        // every thumbnail before it could be shown.
+        thumbnail.DetachedFromVisualTree += (_, _) => thumbnail.Tag = null;
 
         // Pixel art must not be smoothed when scaled into a thumbnail.
         RenderOptions.SetBitmapInterpolationMode(thumbnail, BitmapInterpolationMode.None);
 
-        // Decoding happens off the UI thread: a realised tile must not block
-        // scrolling while a gump inflates.
-        _ = LoadThumbnailAsync(entry, thumbnail);
+        if (_thumbnails.TryGetValue(entry.Id, out Bitmap? cached))
+        {
+            // Straight from the cache: no await, so a re-scroll does not flicker
+            // through a frame of empty tiles.
+            thumbnail.Source = cached;
+        }
+        else
+        {
+            LoadThumbnailAsync(entry.Id, thumbnail);
+        }
 
         return thumbnail;
     }
@@ -449,32 +518,114 @@ public sealed partial class ArtBrowserWindow : Window
         }
     }
 
-    private async Task LoadThumbnailAsync(ArtEntry entry, Image target)
+    private void LoadThumbnailAsync(int id, Image target)
     {
-        Bitmap? bitmap = await Task.Run(() => Decode(entry.Id)).ConfigureAwait(true);
+        _decodeQueue = Continue(_decodeQueue);
 
-        if (bitmap is not null)
+        async Task Continue(Task previous)
         {
-            await Dispatcher.UIThread.InvokeAsync(() => target.Source = bitmap);
+            await previous.ConfigureAwait(true);
+
+            // Scrolling fast queues far more work than it consumes. By the time a
+            // request reaches the front, its tile has usually been reused or
+            // dropped, and decoding for it would only delay the tiles on screen.
+            if (!IsWanted(target, id))
+            {
+                return;
+            }
+
+            if (!_thumbnails.TryGetValue(id, out Bitmap? bitmap))
+            {
+                bitmap = await Task.Run(() => DecodeThumbnail(id)).ConfigureAwait(true);
+
+                if (bitmap is null)
+                {
+                    return;
+                }
+
+                Remember(id, bitmap);
+            }
+
+            if (IsWanted(target, id))
+            {
+                target.Source = bitmap;
+            }
         }
     }
 
-    private Bitmap? Decode(int id)
+    /// <summary>True while a control still wants this id and has not been discarded.</summary>
+    private static bool IsWanted(Image target, int id) =>
+        target.Tag is int wanted && wanted == id;
+
+    private void Remember(int id, Bitmap bitmap)
     {
-        UoImage? image = _kind == ArtBrowserKind.Gump
-            ? _data?.GetGump(id)
-            : _data?.GetStatic(id);
+        _thumbnails[id] = bitmap;
+        _thumbnailOrder.Enqueue(id);
+
+        while (_thumbnailOrder.Count > ThumbnailCacheLimit)
+        {
+            _thumbnails.Remove(_thumbnailOrder.Dequeue());
+        }
+    }
+
+    /// <summary>
+    /// Decodes art already scaled down to tile size.
+    /// </summary>
+    /// <remarks>
+    /// Caching the full-size decode would be far more memory than it is worth: a
+    /// single 300x200 gump is a quarter of a megabyte, and the cache holds
+    /// hundreds. Nearest-neighbour sampling matches how the tile would have been
+    /// drawn anyway, so nothing changes on screen.
+    /// </remarks>
+    private Bitmap? DecodeThumbnail(int id)
+    {
+        UoImage? image = Load(id);
 
         if (image is null)
         {
             return null;
         }
 
-        using SKBitmap skia = Rendering.UoImageConverter.ToSkBitmap(image);
-        using SKData encoded = skia.Encode(SKEncodedImageFormat.Png, 100);
+        using SKBitmap decoded = Rendering.UoImageConverter.ToSkBitmap(image);
+
+        int longest = Math.Max(decoded.Width, decoded.Height);
+
+        if (longest <= TileSize)
+        {
+            return Encode(decoded);
+        }
+
+        double scale = (double)TileSize / longest;
+
+        using SKBitmap scaled = decoded.Resize(
+            new SKImageInfo(
+                Math.Max(1, (int)(decoded.Width * scale)),
+                Math.Max(1, (int)(decoded.Height * scale)),
+                decoded.ColorType,
+                decoded.AlphaType),
+            new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None));
+
+        return scaled is null ? Encode(decoded) : Encode(scaled);
+    }
+
+    private static Bitmap Encode(SKBitmap bitmap)
+    {
+        using SKData encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
         using MemoryStream stream = new(encoded.ToArray());
 
         return new Bitmap(stream);
+    }
+
+    private UoImage? Load(int id) => _kind == ArtBrowserKind.Gump
+        ? _data?.GetGump(id)
+        : _data?.GetStatic(id);
+
+    /// <summary>Decodes art at full size, for the preview panel.</summary>
+    private Bitmap? Decode(int id)
+    {
+        UoImage? image = Load(id);
+
+        return image is null ? null : Encode(Rendering.UoImageConverter.ToSkBitmap(image));
     }
 
     private void UpdatePreview()
