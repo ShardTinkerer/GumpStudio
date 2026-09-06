@@ -11,6 +11,7 @@ using CommunityToolkit.Mvvm.Input;
 
 using GumpStudio.App.Controls;
 using GumpStudio.Core.Commands;
+using GumpStudio.Core.Document;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
 using GumpStudio.Plugins;
@@ -29,6 +30,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly TextBlock _status = null!;
     private readonly MenuItem _exportMenu = null!;
     private readonly MenuItem _pluginsMenu = null!;
+    private readonly MenuItem _moveToPageMenu = null!;
 
     private bool _suppressSelectionSync;
     private List<Element>? _listedElements;
@@ -45,6 +47,13 @@ public sealed partial class MainWindow : Window, IDisposable
         _status = this.FindControl<TextBlock>("StatusText")!;
         _exportMenu = this.FindControl<MenuItem>("MenuExport")!;
         _pluginsMenu = this.FindControl<MenuItem>("MenuPlugins")!;
+        _moveToPageMenu = this.FindControl<MenuItem>("MenuMoveToPage")!;
+
+        // Filled as the Page menu opens rather than kept in sync: a disabled
+        // item never opens its own submenu, so the enabled state has to be
+        // settled one level up.
+        this.FindControl<MenuItem>("MenuPageRoot")!.SubmenuOpened +=
+            (_, _) => FillMoveToPageMenu(_moveToPageMenu);
 
         _canvas.Session = _session;
         _canvas.InteractionChanged += (_, _) => RefreshSelection();
@@ -181,6 +190,7 @@ public sealed partial class MainWindow : Window, IDisposable
         MenuItem backward = Item("Send backward", () => Reorder(_session.Canvas.SendBackward, "backward"));
         MenuItem back = Item("Send to back", () => Reorder(_session.Canvas.SendToBack, "back"));
         MenuItem delete = Item("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
+        MenuItem moveToPage = new() { Header = "Move to page" };
 
         ContextMenu menu = new()
         {
@@ -196,6 +206,8 @@ public sealed partial class MainWindow : Window, IDisposable
                 forward,
                 backward,
                 back,
+                new Separator(),
+                moveToPage,
                 new Separator(),
                 delete,
                 new Separator(),
@@ -221,6 +233,8 @@ public sealed partial class MainWindow : Window, IDisposable
             ungroup.IsEnabled = anyGroup;
             front.IsEnabled = forward.IsEnabled = backward.IsEnabled = back.IsEnabled = selected > 0;
             delete.IsEnabled = selected > 0;
+
+            FillMoveToPageMenu(moveToPage);
         };
 
         return menu;
@@ -614,7 +628,17 @@ public sealed partial class MainWindow : Window, IDisposable
             ColumnDefinitions = new ColumnDefinitions("110,*"),
         };
 
-        TextBlock label = new() { Text = row.Name, Foreground = Brushes.Silver, Margin = new Avalonia.Thickness(0, 4, 6, 0) };
+        // The column is a fixed width, so a long name has to wrap rather than be
+        // cut off mid-glyph with nothing to say it was truncated.
+        TextBlock label = new()
+        {
+            Text = row.Name,
+            Foreground = Brushes.Silver,
+            Margin = new Avalonia.Thickness(0, 4, 6, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+
+        ToolTip.SetTip(label, row.Description ?? row.Name);
 
         Grid.SetColumn(label, 0);
         grid.Children.Add(label);
@@ -757,6 +781,80 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _exportMenu.ItemsSource = items;
         _exportMenu.IsEnabled = items.Count > 0;
+    }
+
+    /// <summary>
+    /// Fills a submenu with every page except the one being edited.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Rebuilt on demand rather than kept in sync, because pages are added and
+    /// removed while the editor is open and a stale entry would point at a page
+    /// that no longer exists.
+    /// </para>
+    /// <para>
+    /// The current page is left out because moving something to the page it is
+    /// already on is a no-op, and offering it invites the click.
+    /// </para>
+    /// </remarks>
+    private void FillMoveToPageMenu(MenuItem parent)
+    {
+        List<MenuItem> targets = [];
+
+        for (int index = 0; index < _session.Document.PageCount; index++)
+        {
+            if (index == _session.ActivePageIndex)
+            {
+                continue;
+            }
+
+            int target = index;
+            GumpPage page = _session.Document.Pages[index];
+
+            MenuItem item = new()
+            {
+                Header = string.IsNullOrEmpty(page.Name)
+                    ? string.Create(CultureInfo.InvariantCulture, $"Page {target}")
+                    : page.Name,
+            };
+
+            item.Click += (_, _) => Guarded(() => MoveSelectionToPage(target));
+
+            targets.Add(item);
+        }
+
+        parent.ItemsSource = targets;
+
+        // A single-page document has nowhere to move to, and nothing selected has
+        // nothing to move.
+        parent.IsEnabled = targets.Count > 0 && _session.Canvas.Selection.Count > 0;
+    }
+
+    /// <summary>
+    /// Moves the selection to another page and follows it there.
+    /// </summary>
+    /// <remarks>
+    /// Following is deliberate. Pages other than 0 are mutually exclusive, so
+    /// moving an element to one while looking at another makes it vanish, which
+    /// reads exactly like a delete. Switching to the destination shows it arrive.
+    /// </remarks>
+    private void MoveSelectionToPage(int index)
+    {
+        int moved = _session.Canvas.MoveSelectionToPage(_session.Document.Pages[index]);
+
+        if (moved == 0)
+        {
+            SetStatus("Select something to move.");
+
+            return;
+        }
+
+        _session.ActivePageIndex = index;
+
+        RefreshAll();
+        SetStatus(moved == 1
+            ? string.Create(CultureInfo.InvariantCulture, $"Moved to page {index}.")
+            : string.Create(CultureInfo.InvariantCulture, $"Moved {moved} elements to page {index}."));
     }
 
     private void BuildPluginMenu()

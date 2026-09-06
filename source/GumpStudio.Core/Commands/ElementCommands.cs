@@ -353,3 +353,66 @@ public sealed class UngroupElementsCommand : IUndoableCommand
         _parent.Insert(Math.Min(_index, _parent.Children.Count), _group);
     }
 }
+
+/// <summary>
+/// Moves an element onto another page, keeping where it sits on screen.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Every page is its own coordinate space rooted at the gump's origin, so an
+/// element that was nested in a group has to be rebased on the way out:
+/// its new location is the absolute position it had before, or it would jump by
+/// the group's offset.
+/// </para>
+/// <para>
+/// The original could not do this at all. Putting an element on the wrong page
+/// meant deleting it and building it again on the right one.
+/// </para>
+/// </remarks>
+public sealed class MoveToPageCommand : IUndoableCommand
+{
+    private readonly Element _element;
+    private readonly GroupElement _target;
+    private readonly GroupElement _source;
+    private readonly int _index;
+    private readonly GumpPoint _location;
+
+    public MoveToPageCommand(Element element, GumpPage target)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        ArgumentNullException.ThrowIfNull(target);
+
+        _element = element;
+        _target = target.Root;
+        _source = element.Parent
+            ?? throw new InvalidOperationException("Cannot move an element that has no parent.");
+
+        if (ReferenceEquals(_source, _target))
+        {
+            throw new InvalidOperationException("The element is already on that page.");
+        }
+
+        _index = _source.IndexOf(element);
+        _location = element.Location;
+    }
+
+    public string Description => "Move to page";
+
+    public void Execute()
+    {
+        GumpPoint absolute = _element.GetAbsolutePosition();
+
+        _source.Remove(_element);
+
+        _element.Location = absolute;
+        _target.Add(_element);
+    }
+
+    public void Undo()
+    {
+        _target.Remove(_element);
+
+        _element.Location = _location;
+        _source.Insert(Math.Min(_index, _source.Children.Count), _element);
+    }
+}

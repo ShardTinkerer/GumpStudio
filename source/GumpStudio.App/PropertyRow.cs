@@ -46,6 +46,21 @@ public sealed class PropertyRow
 
     public string Name { get; }
 
+    /// <summary>A longer explanation, shown as the row's tooltip.</summary>
+    /// <remarks>
+    /// For properties whose name has to stay short enough to fit the label
+    /// column but whose meaning is not obvious from it.
+    /// </remarks>
+    public string? Description { get; private set; }
+
+    /// <summary>Attaches an explanation and returns the same row.</summary>
+    public PropertyRow Describe(string description)
+    {
+        Description = description;
+
+        return this;
+    }
+
     public PropertyEditorKind Kind { get; }
 
     /// <summary>Options, for <see cref="PropertyEditorKind.Choice"/>.</summary>
@@ -88,10 +103,16 @@ public sealed class PropertyRow
 
         // Every element can carry a tooltip: the client attaches one to whichever
         // element it created last, which makes it a per-element property.
-        rows.Add(Integer("Tooltip cliloc", e => e.TooltipClilocId, (e, v) => e.TooltipClilocId = v));
-        rows.Add(Text("Tooltip args", e => e.TooltipArguments, (e, v) => e.TooltipArguments = v));
-        rows.Add(Integer("Item property serial",
-            e => e.ItemPropertySerial, (e, v) => e.ItemPropertySerial = v));
+        rows.Add(Integer("Tooltip cliloc", e => e.TooltipClilocId, (e, v) => e.TooltipClilocId = v)
+            .Describe("Cliloc id shown when the player hovers this element. 0 for none."));
+
+        rows.Add(Text("Tooltip args", e => e.TooltipArguments, (e, v) => e.TooltipArguments = v)
+            .Describe("Substitution arguments for the tooltip cliloc, separated by @."));
+
+        rows.Add(Integer("Item serial", e => e.ItemPropertySerial, (e, v) => e.ItemPropertySerial = v)
+            .Describe(
+                "Serial of a world item whose server-side properties become this element's "
+                + "tooltip. 0 for none."));
 
         rows.Add(Text("Comment", e => e.Comment, (e, v) => e.Comment = v));
 

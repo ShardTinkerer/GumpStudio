@@ -51,9 +51,11 @@
         <MenuItem Header="_Properties…" Name="MenuGumpProperties" />
       </MenuItem>
 
-      <MenuItem Header="_Page">
+      <MenuItem Header="_Page" Name="MenuPageRoot">
         <MenuItem Header="_Add page" Name="MenuAddPage" />
         <MenuItem Header="_Remove page" Name="MenuRemovePage" />
+        <Separator />
+        <MenuItem Header="_Move selection to page" Name="MenuMoveToPage" />
       </MenuItem>
 
       <MenuItem Header="_Plugins" Name="MenuPlugins" />

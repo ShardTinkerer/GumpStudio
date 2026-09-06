@@ -309,3 +309,158 @@ public class ZOrderTests
         Assert.Equal(new GumpPoint(50, 70), Find(page, "b").Location);
     }
 }
+
+/// <summary>
+/// Moving elements between pages.
+/// </summary>
+/// <remarks>
+/// The original could not do this at all: an element placed on the wrong page
+/// had to be deleted and built again on the right one.
+/// </remarks>
+public class MoveToPageTests
+{
+    private static string Order(GumpPage page) =>
+        string.Join(' ', page.Root.Children.Select(c => c.Name));
+
+    [Fact]
+    public void TheSelectionMovesAndTheSourcePageLosesIt()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+        GumpPage first = new();
+        GumpPage second = new();
+
+        first.Root.Add(new ImageElement { Name = "a", Location = new GumpPoint(10, 20) });
+        first.Root.Add(new ImageElement { Name = "b" });
+
+        canvas.Page = first;
+        canvas.Select(first.Root.Children[0]);
+
+        Assert.Equal(1, canvas.MoveSelectionToPage(second));
+
+        Assert.Equal("b", Order(first));
+        Assert.Equal("a", Order(second));
+        Assert.Equal(new GumpPoint(10, 20), second.Root.Children[0].Location);
+    }
+
+    /// <summary>
+    /// Every page is its own coordinate space rooted at the gump's origin, so an
+    /// element leaving a group has to be rebased or it jumps by the group's
+    /// offset.
+    /// </summary>
+    [Fact]
+    public void AnElementLeavingAGroupKeepsItsPlaceOnScreen()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+        GumpPage first = new();
+        GumpPage second = new();
+
+        GroupElement group = new() { Location = new GumpPoint(100, 200) };
+        ImageElement inner = new() { Name = "a", Location = new GumpPoint(5, 6) };
+
+        group.Add(inner);
+        first.Root.Add(group);
+
+        canvas.Page = first;
+        canvas.Select(inner);
+
+        Assert.Equal(1, canvas.MoveSelectionToPage(second));
+        Assert.Equal(new GumpPoint(105, 206), inner.Location);
+    }
+
+    [Fact]
+    public void MovingIsOneUndoEntryAndPutsEverythingBack()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+        GumpPage first = new();
+        GumpPage second = new();
+
+        first.Root.Add(new ImageElement { Name = "a" });
+        first.Root.Add(new ImageElement { Name = "b" });
+        first.Root.Add(new ImageElement { Name = "c" });
+
+        canvas.Page = first;
+        canvas.Select(first.Root.Children[0]);
+        canvas.Toggle(first.Root.Children[2]);
+
+        Assert.Equal(2, canvas.MoveSelectionToPage(second));
+        Assert.Equal("b", Order(first));
+        Assert.Equal("a c", Order(second));
+
+        history.Undo();
+
+        // Back in their original slots, not appended to the end.
+        Assert.Equal("a b c", Order(first));
+        Assert.Equal(string.Empty, Order(second));
+    }
+
+    [Fact]
+    public void TheSelectionIsClearedBecauseItLeftThePage()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+        GumpPage first = new();
+        GumpPage second = new();
+
+        first.Root.Add(new ImageElement { Name = "a" });
+
+        canvas.Page = first;
+        canvas.Select(first.Root.Children[0]);
+        canvas.MoveSelectionToPage(second);
+
+        Assert.Empty(canvas.Selection);
+    }
+
+    [Fact]
+    public void MovingToTheCurrentPageDoesNothing()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+        GumpPage page = new();
+
+        page.Root.Add(new ImageElement { Name = "a" });
+
+        canvas.Page = page;
+        canvas.Select(page.Root.Children[0]);
+
+        Assert.Equal(0, canvas.MoveSelectionToPage(page));
+        Assert.False(history.CanUndo);
+        Assert.Single(canvas.Selection);
+    }
+
+    [Fact]
+    public void MovingNothingIsNotAnUndoEntry()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+
+        canvas.Page = new GumpPage();
+
+        Assert.Equal(0, canvas.MoveSelectionToPage(new GumpPage()));
+        Assert.False(history.CanUndo);
+    }
+
+    [Fact]
+    public void AWholeGroupCanMoveWithItsContents()
+    {
+        UndoHistory history = new();
+        CanvasInteractionController canvas = new(history);
+        GumpPage first = new();
+        GumpPage second = new();
+
+        GroupElement group = new() { Name = "g", Location = new GumpPoint(30, 40) };
+
+        group.Add(new ImageElement { Name = "a", Location = new GumpPoint(1, 2) });
+        first.Root.Add(group);
+
+        canvas.Page = first;
+        canvas.Select(group);
+        canvas.MoveSelectionToPage(second);
+
+        Assert.Equal("g", Order(second));
+        Assert.Equal(new GumpPoint(30, 40), group.Location);
+        Assert.Equal(new GumpPoint(1, 2), group.Children[0].Location);
+    }
+}

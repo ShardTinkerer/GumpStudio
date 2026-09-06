@@ -463,6 +463,47 @@ public sealed class CanvasInteractionController(UndoHistory history)
         return moved;
     }
 
+    /// <summary>
+    /// Moves the selection onto another page.
+    /// </summary>
+    /// <returns>How many elements moved.</returns>
+    /// <remarks>
+    /// Each element keeps where it sits on screen, so one nested in a group is
+    /// rebased on the way out. The selection is cleared afterwards because the
+    /// elements are no longer on the page this controller is editing.
+    /// </remarks>
+    public int MoveSelectionToPage(GumpPage target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        if (_page is null || ReferenceEquals(_page, target) || _selection.Count == 0)
+        {
+            return 0;
+        }
+
+        // Copied, because the loop reparents each element and the selection is
+        // cleared at the end.
+        List<Element> moving = [.. _selection.Where(e => e.Parent is not null)];
+
+        if (moving.Count == 0)
+        {
+            return 0;
+        }
+
+        using (UndoHistory.CompositeScope scope = history.BeginComposite("Move to page"))
+        {
+            foreach (Element element in moving)
+            {
+                scope.Run(new MoveToPageCommand(element, target));
+            }
+        }
+
+        ClearSelection();
+        OnChanged();
+
+        return moving.Count;
+    }
+
     /// <summary>Deletes the selection.</summary>
     public void DeleteSelection()
     {

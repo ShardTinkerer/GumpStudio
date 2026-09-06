@@ -153,7 +153,7 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 447 tests across the solution; 6 skip when the single-client
+Done. 454 tests across the solution; 6 skip when the single-client
 environment variables are unset, and the client-data theories skip entirely when
 no installation is configured, so CI stays green.
 
@@ -197,6 +197,28 @@ Fixed while testing those: selecting an element in the element list left the
 property panel showing "Nothing selected". The list rebuilt its item source on
 every refresh, and the resulting selection-reset event raced the suppression
 flag. It now rebuilds only when the page contents actually change.
+
+### Moving elements between pages
+
+**Page ▸ Move selection to page**, and the same submenu on the context menu,
+listing every page except the one being edited. The original could not do this at
+all: an element placed on the wrong page had to be deleted and rebuilt on the
+right one.
+
+Every page is its own coordinate space rooted at the gump's origin, so an element
+leaving a group is rebased on the way out — its new location is the absolute
+position it had — or it would jump by the group's offset. Undo puts each element
+back in its original slot, not on the end.
+
+The editor follows the elements to the destination page. That is deliberate:
+pages other than 0 are mutually exclusive, so moving something to one while
+looking at another makes it vanish, which reads exactly like a delete.
+
+The submenu is rebuilt each time it opens rather than kept in sync, because pages
+come and go while the editor is open and a stale entry would point at a page that
+no longer exists. It is filled from the **Page** menu's own opening, not the
+submenu's, because a disabled item never opens its submenu and the enabled state
+has to be settled one level up.
 
 ### Drawing order, ungrouping, and shortcuts that work
 
