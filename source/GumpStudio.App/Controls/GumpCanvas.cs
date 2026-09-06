@@ -6,6 +6,8 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 
 using GumpStudio.Core.Editing;
+using GumpStudio.Core.Elements;
+using GumpStudio.Core.Geometry;
 using GumpStudio.Core.Primitives;
 using GumpStudio.Rendering;
 
@@ -181,11 +183,83 @@ public sealed class GumpCanvas : Control, IDisposable
 
         base.OnPointerMoved(e);
 
-        if (_session?.Canvas.IsDragging == true)
+        if (_session is null)
         {
-            _session.Canvas.PointerMoved(ToGump(e.GetPosition(this)));
-            e.Handled = true;
+            return;
         }
+
+        GumpPoint at = ToGump(e.GetPosition(this));
+
+        if (_session.Canvas.IsDragging)
+        {
+            _session.Canvas.PointerMoved(at);
+            e.Handled = true;
+
+            return;
+        }
+
+        UpdateCursor(at);
+    }
+
+    /// <summary>
+    /// Shows what a press here would do.
+    /// </summary>
+    /// <remarks>
+    /// Without this the resize handles are invisible to the hand: there is no way
+    /// to tell a grab point from the element body until you have already dragged
+    /// something. The mapping asks the same
+    /// <c>HandleGeometry</c> the press handler will use, so the cursor cannot
+    /// disagree with what actually happens.
+    /// </remarks>
+    private void UpdateCursor(GumpPoint at)
+    {
+        DragMode mode = DragMode.None;
+
+        // Handles on the current selection win, matching the press handler.
+        foreach (Element selected in _session!.Canvas.Selection)
+        {
+            if (!selected.IsResizable)
+            {
+                continue;
+            }
+
+            DragMode handle = HandleGeometry.HitTest(selected.GetAbsoluteBounds(), at, resizable: true);
+
+            if (HandleGeometry.IsResize(handle))
+            {
+                mode = handle;
+
+                break;
+            }
+        }
+
+        if (mode == DragMode.None && _session.Canvas.HitTest(at) is not null)
+        {
+            mode = DragMode.Move;
+        }
+
+        Cursor = CursorFor(mode);
+    }
+
+    private static Cursor CursorFor(DragMode mode) => new(mode switch
+    {
+        DragMode.ResizeLeft or DragMode.ResizeRight => StandardCursorType.SizeWestEast,
+        DragMode.ResizeTop or DragMode.ResizeBottom => StandardCursorType.SizeNorthSouth,
+
+        // Avalonia names the diagonals after the corner pair they span.
+        DragMode.ResizeTopLeft or DragMode.ResizeBottomRight => StandardCursorType.TopLeftCorner,
+        DragMode.ResizeTopRight or DragMode.ResizeBottomLeft => StandardCursorType.TopRightCorner,
+
+        DragMode.Move => StandardCursorType.SizeAll,
+        _ => StandardCursorType.Arrow,
+    });
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+
+        // Leave the pointer as the caller found it once it is off the canvas.
+        Cursor = Cursor.Default;
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
@@ -199,7 +273,12 @@ public sealed class GumpCanvas : Control, IDisposable
             return;
         }
 
-        _session.Canvas.PointerReleased(ToGump(e.GetPosition(this)));
+        GumpPoint at = ToGump(e.GetPosition(this));
+
+        _session.Canvas.PointerReleased(at);
+
+        // The selection has just changed, so what a press would do here has too.
+        UpdateCursor(at);
 
         e.Pointer.Capture(null);
         e.Handled = true;

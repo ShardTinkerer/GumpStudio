@@ -75,6 +75,8 @@ internal static class Program
 
         Console.WriteLine($"Client:        {context.ClientPath}");
         Console.WriteLine($"Gump slots:    {context.GumpCount}");
+        Console.WriteLine($"Gumps present: {context.EnumerateGumpIds().Count()}");
+        Console.WriteLine($"Items present: {context.EnumerateItemIds().Count()}");
         Console.WriteLine($"Hues:          {context.Hues.Count}");
         Console.WriteLine($"Static tiles:  {context.TileData.StaticCount}"
             + $" ({(context.TileData.IsHighSeasFormat ? "High Seas" : "legacy")} tiledata)");

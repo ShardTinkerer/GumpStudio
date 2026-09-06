@@ -147,6 +147,9 @@ public sealed class MulFileProvider : IUoFileProvider
         }
     }
 
+    public bool Exists(int index) =>
+        (uint)index < (uint)_entries.Length && _entries[index].Exists;
+
     public UoFileEntry GetEntry(int index) =>
         (uint)index < (uint)_entries.Length ? _entries[index] : UoFileEntry.Missing;
 

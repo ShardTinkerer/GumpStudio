@@ -180,3 +180,60 @@ public class MulFileProviderTests
         Assert.Same(VerdataPatchSet.Empty, verdata);
     }
 }
+
+/// <summary>
+/// Tests for the cheap existence probe that the art browser enumerates with.
+/// </summary>
+/// <remarks>
+/// It must not decode: on a UOP gump package, asking for an entry's dimensions
+/// costs an inflate plus a Burrows-Wheeler pass, and a browser walks tens of
+/// thousands of ids.
+/// </remarks>
+public class ProviderExistenceTests
+{
+    [Fact]
+    public void ExistsAgreesWithGetEntryForAMulContainer()
+    {
+        using TempDirectory dir = new();
+
+        (string indexPath, string dataPath) = new MulFixture()
+            .Add([1, 2, 3])
+            .AddMissing()
+            .Add([4])
+            .Write(dir.Path);
+
+        using MulFileProvider provider = MulFileProvider.Open(indexPath, dataPath, UoFileKind.Art);
+
+        Assert.True(provider.Exists(0));
+        Assert.False(provider.Exists(1));
+        Assert.True(provider.Exists(2));
+
+        for (int i = -1; i < 5; i++)
+        {
+            Assert.Equal(provider.GetEntry(i).Exists, provider.Exists(i));
+        }
+    }
+
+    [Fact]
+    public void ExistsAgreesWithGetEntryForAUopContainer()
+    {
+        const string Pattern = "build/gumpartlegacymul/{0:D8}.tga";
+
+        using TempDirectory dir = new();
+
+        string path = new UopFixture()
+            .AddWithDimensions(UopHash.ComputeForIndex(Pattern, 0), [1, 2, 3, 4], 8, 4, compress: true)
+            .Write(dir.Path);
+
+        using UopFileProvider provider =
+            UopFileProvider.Open(path, Pattern, maxEntries: 8, hasExtraDimensions: true);
+
+        Assert.True(provider.Exists(0));
+        Assert.False(provider.Exists(1));
+        Assert.False(provider.Exists(-1));
+
+        // Only now should the dimensions have been decoded.
+        Assert.Equal(8, provider.GetEntry(0).ExtraWidth);
+        Assert.Equal(4, provider.GetEntry(0).ExtraHeight);
+    }
+}

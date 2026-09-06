@@ -28,6 +28,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly MenuItem _pluginsMenu = null!;
 
     private bool _suppressSelectionSync;
+    private List<Element>? _listedElements;
 
     public MainWindow()
     {
@@ -45,8 +46,10 @@ public sealed partial class MainWindow : Window, IDisposable
         _canvas.Session = _session;
         _canvas.InteractionChanged += (_, _) => RefreshSelection();
 
-        _session.DocumentChanged += (_, _) => RefreshAll();
-        _session.PageChanged += (_, _) => RefreshAll();
+        _elementList.SelectionChanged += OnElementListSelectionChanged;
+
+        _session.DocumentChanged += (_, _) => { _listedElements = null; RefreshAll(); };
+        _session.PageChanged += (_, _) => { _listedElements = null; RefreshAll(); };
         _session.Notified += (_, n) => SetStatus(n.Message);
 
         BuildToolbox();
@@ -241,20 +244,36 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
+    /// <summary>
+    /// Syncs the element list with the page and the current selection.
+    /// </summary>
+    /// <remarks>
+    /// The item source is rebuilt only when the page's contents actually change.
+    /// Reassigning it unconditionally made the list reset its own selection on
+    /// every refresh, and the resulting event raced the suppression flag — the
+    /// visible symptom was a selected element whose properties never appeared.
+    /// </remarks>
     private void RefreshElementList()
     {
         _suppressSelectionSync = true;
 
-        List<Element> elements = [.. _session.ActivePage.Root.Children];
+        try
+        {
+            IReadOnlyList<Element> children = _session.ActivePage.Root.Children;
 
-        _elementList.ItemsSource = elements;
-        _elementList.SelectionChanged -= OnElementListSelectionChanged;
-        _elementList.SelectionChanged += OnElementListSelectionChanged;
+            if (_listedElements is null || !_listedElements.SequenceEqual(children))
+            {
+                _listedElements = [.. children];
+                _elementList.ItemsSource = _listedElements;
+            }
 
-        Element? selected = _session.Canvas.Selection.Count == 1 ? _session.Canvas.Selection[0] : null;
-        _elementList.SelectedItem = selected;
-
-        _suppressSelectionSync = false;
+            _elementList.SelectedItem =
+                _session.Canvas.Selection.Count == 1 ? _session.Canvas.Selection[0] : null;
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
     }
 
     private void OnElementListSelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -324,6 +343,8 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             PropertyEditorKind.Boolean => BuildBooleanEditor(element, row),
             PropertyEditorKind.Choice => BuildChoiceEditor(element, row),
+            PropertyEditorKind.GumpId => BuildBrowsableIdEditor(element, row, ArtBrowserKind.Gump),
+            PropertyEditorKind.ItemId => BuildBrowsableIdEditor(element, row, ArtBrowserKind.Item),
             _ => BuildTextEditor(element, row),
         };
 
@@ -350,6 +371,54 @@ public sealed partial class MainWindow : Window, IDisposable
         };
 
         return box;
+    }
+
+    /// <summary>
+    /// A number field with a browse button beside it.
+    /// </summary>
+    /// <remarks>
+    /// Typing raw ids is unusable — nobody remembers that 5054 is a stone frame —
+    /// which is why the original shipped art browsers. The field stays editable
+    /// for anyone who does know the number.
+    /// </remarks>
+    private Grid BuildBrowsableIdEditor(Element element, PropertyRow row, ArtBrowserKind kind)
+    {
+        Grid layout = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+
+        TextBox box = BuildTextEditor(element, row);
+
+        Grid.SetColumn(box, 0);
+        layout.Children.Add(box);
+
+        Button browse = new()
+        {
+            Content = "…",
+            Width = 30,
+            Margin = new Avalonia.Thickness(4, 0, 0, 0),
+            IsEnabled = _session.Data is not null,
+        };
+
+        browse.Click += async (_, _) =>
+        {
+            int current = row.Read(element) is int id ? id : 0;
+
+            ArtBrowserWindow browser = new(_session.Data, kind, current);
+
+            await browser.ShowDialog(this).ConfigureAwait(true);
+
+            if (browser.SelectedId is { } chosen)
+            {
+                box.Text = chosen.ToString(CultureInfo.InvariantCulture);
+
+                ApplyProperty(element, row, chosen);
+                RefreshProperties();
+            }
+        };
+
+        Grid.SetColumn(browse, 1);
+        layout.Children.Add(browse);
+
+        return layout;
     }
 
     private CheckBox BuildBooleanEditor(Element element, PropertyRow row)

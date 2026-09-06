@@ -266,7 +266,47 @@ public sealed class UoDataContext : IDisposable
     }
 
     /// <summary>True when a gump id has art behind it.</summary>
-    public bool IsValidGump(int gumpId) => TryGetGumpSize(gumpId, out _, out _);
+    /// <remarks>
+    /// Cheap: does not decode. Use <see cref="TryGetGumpSize"/> when the
+    /// dimensions are actually needed.
+    /// </remarks>
+    public bool IsValidGump(int gumpId) => _gumps?.Exists(gumpId) == true;
+
+    /// <summary>Every gump id that has art, in ascending order.</summary>
+    public IEnumerable<int> EnumerateGumpIds()
+    {
+        if (_gumps is null)
+        {
+            yield break;
+        }
+
+        for (int id = 0; id < _gumps.Count; id++)
+        {
+            if (_gumps.Exists(id))
+            {
+                yield return id;
+            }
+        }
+    }
+
+    /// <summary>Every static item id that has art, in ascending order.</summary>
+    public IEnumerable<int> EnumerateItemIds()
+    {
+        if (_art is null)
+        {
+            yield break;
+        }
+
+        int max = _art.Count - ArtDecoder.StaticArtOffset;
+
+        for (int id = 0; id < max; id++)
+        {
+            if (_art.Exists(id + ArtDecoder.StaticArtOffset))
+            {
+                yield return id;
+            }
+        }
+    }
 
     /// <summary>Decodes a gump, optionally recoloured.</summary>
     /// <param name="gumpId">The gump id.</param>
@@ -286,7 +326,7 @@ public sealed class UoDataContext : IDisposable
 
     /// <summary>True when an item id has static art behind it.</summary>
     public bool IsValidStatic(int itemId) =>
-        _art is not null && _art.GetEntry(itemId + ArtDecoder.StaticArtOffset).Exists;
+        _art?.Exists(itemId + ArtDecoder.StaticArtOffset) == true;
 
     /// <summary>Decodes a static item tile, optionally recoloured.</summary>
     /// <param name="itemId">The item id, as gump scripts use it (not offset by 0x4000).</param>

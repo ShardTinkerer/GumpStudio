@@ -172,16 +172,37 @@ Verified by running the application against a 7.0.114.4 client: the canvas draws
 real art, the element list and property panel populate, and a document opens from
 the command line.
 
-**Not built.** These were in the original plan for this phase and are not done:
+### Art browser and pointer feedback
 
-- Dedicated art, hue and cliloc browser dialogs. Gump ids, item ids and hues are
-  typed as numbers (decimal or `0x`-prefixed) rather than picked from a visual
-  grid. The data layer already exposes everything a browser needs.
+Added after the first pass, both reported as missing against the original:
+
+- **Art browsers.** Gump id and item id fields have a browse button opening a
+  picker that lists only ids with art, shows a thumbnail per row, filters by id
+  (decimal or `0x`) or tile name, and previews the selection with its dimensions.
+  Enumeration uses a new `IUoFileProvider.Exists` probe that does *not* decode —
+  on a UOP client, resolving a gump's dimensions costs an inflate plus a
+  Burrows-Wheeler pass, so walking tens of thousands of ids the obvious way would
+  take minutes. Thumbnails decode off the UI thread as rows are realised.
+- **Resize cursors.** Hovering a resize handle now shows the matching directional
+  cursor and the element body shows a move cursor. The hit test asks the same
+  `HandleGeometry` the press handler uses, so the cursor cannot disagree with
+  what a press will actually do.
+
+Fixed while testing those: selecting an element in the element list left the
+property panel showing "Nothing selected". The list rebuilt its item source on
+every refresh, and the resulting selection-reset event raced the suppression
+flag. It now rebuilds only when the page contents actually change.
+
+**Not built.** Still missing relative to the original:
+
+- A **hue picker**. Hues are still typed as numbers, and a hue is as opaque as a
+  gump id. The same browser pattern would suit it — swatches instead of
+  thumbnails — and `HueTable` already exposes the colours.
+- A **cliloc browser** for the HTML element's localised id.
 - Clipboard cut/copy/paste.
 - A plugin manager UI for enabling and ordering plugins; discovery currently
   loads everything it finds.
-- Element reordering and grouping from the element list — grouping is on the Edit
-  menu only.
+- Element reordering from the element list — grouping is on the Edit menu only.
 
 ## Phase 5 — Plugins and the POL exporter ✅
 

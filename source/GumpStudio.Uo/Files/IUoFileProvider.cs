@@ -13,6 +13,17 @@ public interface IUoFileProvider : IDisposable
     /// <summary>Number of index slots, including empty ones.</summary>
     int Count { get; }
 
+    /// <summary>
+    /// Whether a slot holds data, without decoding it.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="GetEntry"/>: for a UOP gump package
+    /// the dimensions live inside the compressed payload, so asking for an entry
+    /// forces a decode. Enumerating tens of thousands of ids to populate an art
+    /// browser must not pay that cost.
+    /// </remarks>
+    bool Exists(int index);
+
     /// <summary>Describes the slot at <paramref name="index"/> without reading its data.</summary>
     /// <remarks>
     /// Art browsers use this to show dimensions for thousands of entries without

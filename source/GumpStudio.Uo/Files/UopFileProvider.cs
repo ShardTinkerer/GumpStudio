@@ -251,6 +251,9 @@ public sealed class UopFileProvider : IUoFileProvider
         };
     }
 
+    public bool Exists(int index) =>
+        (uint)index < (uint)_entries.Length && _entries[index].Exists;
+
     public UoFileEntry GetEntry(int index)
     {
         if ((uint)index >= (uint)_entries.Length)
