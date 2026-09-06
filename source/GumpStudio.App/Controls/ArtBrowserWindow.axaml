@@ -11,7 +11,7 @@
     <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" Margin="0,0,0,8">
       <TextBlock Grid.Column="0" Text="Filter" VerticalAlignment="Center" Margin="0,0,8,0" />
       <TextBox Grid.Column="1" Name="FilterBox"
-               Watermark="id (decimal or 0x…) or name" />
+               PlaceholderText="id (decimal or 0x…) or name" />
       <ToggleButton Grid.Column="2" Name="GalleryToggle" Content="Gallery"
                     Margin="8,0,0,0" MinWidth="80"
                     ToolTip.Tip="Show the art as a grid of tiles instead of a list." />

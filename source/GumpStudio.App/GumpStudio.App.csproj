@@ -26,12 +26,39 @@
   </ItemGroup>
 
   <!--
+    A NativeAOT image cannot load an assembly at runtime, so the shipped
+    exporters are linked in and registered directly instead of being discovered
+    on disk. Third-party plugins are simply not available in an AOT build; that
+    is a property of AOT, not a decision.
+  -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <GumpStudioStaticPlugins>true</GumpStudioStaticPlugins>
+    <DefineConstants>$(DefineConstants);STATIC_PLUGINS</DefineConstants>
+
+    <!--
+      IL3051 fires inside System.Formats.Nrbf 10.0.11, which Microsoft ships:
+      SZArrayRecord<T>.Deserialize overrides a RequiresDynamicCode member without
+      carrying the attribute. It is an annotation-consistency check, raised
+      whether or not the method is reachable, and the legacy importer never calls
+      it — it walks the records by hand with GetArray and GetRawValue and
+      deliberately never activates a type. Revisit when the package is fixed.
+    -->
+    <NoWarn>$(NoWarn);IL3051</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(GumpStudioStaticPlugins)' == 'true'">
+    <ProjectReference Include="../GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj" />
+    <ProjectReference Include="../GumpStudio.Plugins.RunUo/GumpStudio.Plugins.RunUo.csproj" />
+    <ProjectReference Include="../GumpStudio.Plugins.Sphere/GumpStudio.Plugins.Sphere.csproj" />
+  </ItemGroup>
+
+  <!--
     Plugin deployment. The old solution had no step like this at all, so a fresh
     build produced an app with an empty Plugins folder and zero plugins loaded.
     Plugins are built but deliberately NOT referenced for compilation: the host
     discovers them on disk through an AssemblyLoadContext.
   -->
-  <ItemGroup>
+  <ItemGroup Condition="'$(GumpStudioStaticPlugins)' != 'true'">
     <ProjectReference Include="../GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj"
                       ReferenceOutputAssembly="false"
                       Private="false"
@@ -46,7 +73,7 @@
                       OutputItemType="PluginBuildOutput" />
   </ItemGroup>
 
-  <Target Name="CopyPluginsToOutput" AfterTargets="Build">
+  <Target Condition="'$(GumpStudioStaticPlugins)' != 'true'" Name="CopyPluginsToOutput" AfterTargets="Build">
     <Copy SourceFiles="@(PluginBuildOutput)"
           DestinationFolder="$(OutDir)Plugins"
           SkipUnchangedFiles="true" />
@@ -59,7 +86,7 @@
     ships with an empty Plugins folder and no exporters — the same gap the old
     solution had.
   -->
-  <Target Name="CopyPluginsToPublish" AfterTargets="Publish">
+  <Target Condition="'$(GumpStudioStaticPlugins)' != 'true'" Name="CopyPluginsToPublish" AfterTargets="Publish">
     <Copy SourceFiles="@(PluginBuildOutput)"
           DestinationFolder="$(PublishDir)Plugins"
           SkipUnchangedFiles="true" />

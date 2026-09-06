@@ -108,6 +108,15 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
     }
 
     /// <summary>Discovers and initialises plugins from a directory.</summary>
+    /// <remarks>
+    /// Carries the loader's own restriction: a plugin is an assembly the build
+    /// never saw, so a trimmed or ahead-of-time image cannot load it. Those
+    /// builds call <see cref="RegisterBuiltInPlugins"/> instead.
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.RequiresUnreferencedCode(
+        "Plugins are discovered from disk by reflection. Use RegisterBuiltInPlugins instead.")]
+    [System.Diagnostics.CodeAnalysis.RequiresDynamicCode(
+        "Plugins are discovered from disk by reflection. Use RegisterBuiltInPlugins instead.")]
     public IReadOnlyList<DiscoveredPlugin> LoadPlugins(string directory)
     {
         IReadOnlyList<DiscoveredPlugin> discovered = _loader.Discover(directory);

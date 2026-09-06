@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.Loader;
 
@@ -35,10 +36,25 @@ public sealed record DiscoveredPlugin(
 /// </remarks>
 public sealed class PluginLoader : IDisposable
 {
+    /// <summary>
+    /// Why loading plugins cannot survive trimming or ahead-of-time compilation.
+    /// </summary>
+    /// <remarks>
+    /// A plugin is an assembly the build never saw, so nothing can be proved
+    /// about which types it needs; a trimmer would remove them and a NativeAOT
+    /// image cannot load an assembly at all. Applications published that way
+    /// register their exporters directly instead.
+    /// </remarks>
+    private const string RequiresLoading =
+        "Plugins are discovered from disk by reflection, which trimming and "
+        + "NativeAOT cannot support. Register plugins directly instead.";
+
     private readonly List<PluginLoadContext> _contexts = [];
 
     /// <summary>Scans a directory for plugin assemblies.</summary>
     /// <param name="directory">Folder to scan. A missing folder yields nothing.</param>
+    [RequiresUnreferencedCode(RequiresLoading)]
+    [RequiresDynamicCode(RequiresLoading)]
     public IReadOnlyList<DiscoveredPlugin> Discover(string directory)
     {
         ArgumentNullException.ThrowIfNull(directory);
@@ -59,6 +75,8 @@ public sealed class PluginLoader : IDisposable
     }
 
     /// <summary>Loads every plugin in one assembly.</summary>
+    [RequiresUnreferencedCode(RequiresLoading)]
+    [RequiresDynamicCode(RequiresLoading)]
     public IReadOnlyList<DiscoveredPlugin> Load(string assemblyPath)
     {
         ArgumentNullException.ThrowIfNull(assemblyPath);
@@ -102,6 +120,7 @@ public sealed class PluginLoader : IDisposable
         return found;
     }
 
+    [RequiresUnreferencedCode(RequiresLoading)]
     private static IEnumerable<Type> GetPluginTypes(Assembly assembly)
     {
         try
@@ -116,12 +135,15 @@ public sealed class PluginLoader : IDisposable
         }
     }
 
-    private static bool IsPluginType(Type type) =>
+    private static bool IsPluginType(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type) =>
         typeof(IGumpStudioPlugin).IsAssignableFrom(type)
         && type is { IsAbstract: false, IsInterface: false }
         && type.GetConstructor(Type.EmptyTypes) is not null;
 
-    private static DiscoveredPlugin Instantiate(Type type, string assemblyPath)
+    private static DiscoveredPlugin Instantiate(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type,
+        string assemblyPath)
     {
         try
         {
@@ -173,6 +195,21 @@ public sealed class PluginLoader : IDisposable
     {
         private readonly AssemblyDependencyResolver _resolver = new(assemblyPath);
 
+        /// <summary>
+        /// Resolves a dependency next to the plugin.
+        /// </summary>
+        /// <remarks>
+        /// The suppression is unavoidable rather than convenient: this is an
+        /// override, so it cannot carry the trim annotation its body needs, and
+        /// the base method does not carry one either. It is safe because nothing
+        /// reaches this code in a trimmed or ahead-of-time build — the public
+        /// entry points are annotated, and an application published that way
+        /// registers its plugins directly instead of loading any.
+        /// </remarks>
+        [UnconditionalSuppressMessage(
+            "Trimming",
+            "IL2026:RequiresUnreferencedCode",
+            Justification = "Unreachable in a trimmed or AOT build; see the remarks.")]
         protected override Assembly? Load(AssemblyName assemblyName)
         {
             // Returning null delegates to the default context, which is what

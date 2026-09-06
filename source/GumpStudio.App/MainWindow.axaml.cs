@@ -76,7 +76,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
         LoadGridSettings();
 
-        LoadExternalPlugins();
+        LoadPlugins();
         BuildExportMenu();
         BuildPluginMenu();
 
@@ -1044,6 +1044,28 @@ public sealed partial class MainWindow : Window, IDisposable
         _pluginsMenu.ItemsSource = items;
     }
 
+    /// <summary>
+    /// Makes the exporters available.
+    /// </summary>
+    /// <remarks>
+    /// A NativeAOT image cannot load an assembly at runtime, so there the
+    /// shipped exporters are linked in and registered directly. Every other
+    /// build discovers them on disk, which is also how a third-party plugin
+    /// arrives.
+    /// </remarks>
+    private void LoadPlugins()
+    {
+#if STATIC_PLUGINS
+        _session.RegisterBuiltInPlugins(
+            new Plugins.Pol.PolExporterPlugin(),
+            new Plugins.RunUo.RunUoExporterPlugin(),
+            new Plugins.Sphere.SphereExporterPlugin());
+#else
+        LoadExternalPlugins();
+#endif
+    }
+
+#if !STATIC_PLUGINS
     private void LoadExternalPlugins()
     {
         string directory = Path.Combine(AppContext.BaseDirectory, "Plugins");
@@ -1055,6 +1077,7 @@ public sealed partial class MainWindow : Window, IDisposable
             SetStatus($"{failed.Info.Name} could not load: {failed.Error}", isError: true);
         }
     }
+#endif
 
     private async Task OpenAsync()
     {

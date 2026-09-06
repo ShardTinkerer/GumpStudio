@@ -566,6 +566,40 @@ implemented until something needs them.
   dotnet publish source/GumpStudio.App -c Release -r linux-x64 --self-contained
   ```
 
+- ✅ **NativeAOT publishing.** `eng/publish-aot.ps1` produces a single native
+  binary — 23 MB on `win-x64`, no runtime to install and no managed assemblies
+  beside it, just the native Skia, HarfBuzz and ANGLE libraries Avalonia needs.
+  Verified running: it opens the editor, reads client art and renders a document
+  identically to the ordinary build.
+
+  Nothing in the element model, the UO data layer, the renderer or the Avalonia
+  shell produced a single trim or AOT warning. Everything that stood in the way
+  came from two places outside them.
+
+  **Plugins cannot be loaded at all.** A plugin is an assembly the build never
+  saw; a trimmer has no way to know which of its types matter and a NativeAOT
+  image cannot load an assembly whatsoever. `PluginLoader` is annotated
+  `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]` to say so, which makes
+  the restriction propagate to anything that calls it instead of surfacing as
+  warnings inside the loader. An AOT build therefore links the three shipped
+  exporters in and registers them through the existing
+  `RegisterBuiltInPlugins`; ordinary builds are untouched and still discover
+  plugins on disk, which is also how a third-party one arrives.
+
+  **`System.Formats.Nrbf` has an annotation defect.** In 10.0.11,
+  `SZArrayRecord<T>.Deserialize` overrides a `RequiresDynamicCode` member without
+  carrying the attribute, and `IL3051` is raised whether or not the method is
+  reachable. The legacy importer never calls it — it walks the records by hand
+  with `GetArray` and `GetRawValue`, and deliberately never activates a type — so
+  that one id is suppressed for the AOT publish, with the reason recorded beside
+  it. Worth removing when the package is fixed.
+
+  On Windows the ILCompiler shells out to `vswhere.exe` to find the MSVC linker,
+  and it is not on `PATH` outside a developer prompt: the link step then fails
+  with `'vswhere.exe' is not recognized` long after compilation has succeeded,
+  which reads like a compiler problem and is not one. The script puts it on
+  `PATH` and fails with a clear message if the C++ workload is missing.
+
 - ⬜ **`src/` is deliberately still here.** The plan made deleting it conditional
   on reaching parity, and parity is not reached: the art, hue and cliloc
   browsers, the clipboard and the plugin manager are not built, and `src/` is

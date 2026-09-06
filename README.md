@@ -62,6 +62,21 @@ gumpstudio export --in mygump.gump --name d_shop --format sphere-056 --out d_sho
 Six formats are available: `pol`, `pol-layout`, `runuo`, `runuo-numeric`,
 `sphere-056` and `sphere-099`. Run `gumpstudio` with no arguments for the list.
 
+## Building a release
+
+```sh
+# Self-contained, with plugins discovered from the Plugins folder
+dotnet publish source/GumpStudio.App -c Release -r win-x64 --self-contained
+
+# Single native binary, no runtime to install
+pwsh eng/publish-aot.ps1 -Runtime win-x64
+```
+
+The NativeAOT build compiles the three shipped exporters in, because a native
+image cannot load an assembly at runtime. Use the ordinary self-contained build
+if you need third-party plugins. On Windows it needs the MSVC toolchain — the
+"Desktop development with C++" workload.
+
 ## Repository layout
 
 ```
