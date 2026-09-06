@@ -6,12 +6,14 @@
 .DESCRIPTION
     Produces a single native binary with no .NET runtime to install and no
     managed assemblies beside it, next to the native SkiaSharp, HarfBuzz and
-    ANGLE libraries Avalonia needs.
+    ANGLE libraries Avalonia needs. PublishAot implies a self-contained
+    publish, so --self-contained is not passed and would add nothing.
 
-    The shipped exporters are compiled in and registered directly, because a
-    NativeAOT image cannot load an assembly at runtime. Third-party plugins are
-    therefore unavailable in an AOT build; publish the ordinary self-contained
-    build if you need them.
+    This runs the same code as an ordinary build. It did not always: the
+    exporters used to arrive as plugin assemblies, which a NativeAOT image
+    cannot load at all, so that build needed a second registration path behind
+    an #if. The converters are referenced normally now and there is no
+    difference left to accommodate.
 
 .PARAMETER Runtime
     Runtime identifier, for example win-x64, linux-x64 or osx-arm64. Defaults to
