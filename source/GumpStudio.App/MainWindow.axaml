@@ -27,6 +27,10 @@
         <MenuItem Header="_Undo" Name="MenuUndo" InputGesture="Ctrl+Z" />
         <MenuItem Header="_Redo" Name="MenuRedo" InputGesture="Ctrl+Y" />
         <Separator />
+        <MenuItem Header="Cu_t" Name="MenuCut" InputGesture="Ctrl+X" />
+        <MenuItem Header="_Copy" Name="MenuCopy" InputGesture="Ctrl+C" />
+        <MenuItem Header="_Paste" Name="MenuPaste" InputGesture="Ctrl+V" />
+        <Separator />
         <MenuItem Header="Select _all" Name="MenuSelectAll" InputGesture="Ctrl+A" />
         <MenuItem Header="_Delete" Name="MenuDelete" InputGesture="Delete" />
         <MenuItem Header="_Group selection" Name="MenuGroup" InputGesture="Ctrl+G" />

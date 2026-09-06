@@ -667,6 +667,69 @@ public sealed class CanvasInteractionController(UndoHistory history)
         ? element.X + (element.Width / 2)
         : element.Y + (element.Height / 2);
 
+    /// <summary>
+    /// Adds a copied set of elements to the page and selects them.
+    /// </summary>
+    /// <returns>How many were added.</returns>
+    /// <remarks>
+    /// <para>
+    /// Each is offset slightly so it does not land exactly on whatever it was
+    /// copied from. The original pasted at the original coordinates, which meant
+    /// pressing paste twice silently buried one copy under another with nothing
+    /// on screen to say a second had appeared.
+    /// </para>
+    /// <para>
+    /// Elements are cloned on the way in, so the caller can paste the same set
+    /// repeatedly and get independent copies. The original added the clipboard's
+    /// own objects, so a second paste re-parented the first paste's elements
+    /// rather than duplicating them.
+    /// </para>
+    /// </remarks>
+    public int Paste(IReadOnlyList<Element> elements)
+    {
+        ArgumentNullException.ThrowIfNull(elements);
+
+        if (_page is null || elements.Count == 0)
+        {
+            return 0;
+        }
+
+        // One grid cell when snapping, so a pasted copy stays on the grid.
+        int dx = Grid.SnapEnabled ? Grid.Width : PasteOffset;
+        int dy = Grid.SnapEnabled ? Grid.Height : PasteOffset;
+
+        List<Element> added = [];
+
+        using (UndoHistory.CompositeScope scope = history.BeginComposite("Paste"))
+        {
+            foreach (Element source in elements)
+            {
+                Element copy = source.Clone();
+
+                copy.Location = copy.Location.Offset(dx, dy);
+                added.Add(copy);
+
+                scope.Run(new AddElementCommand(_page.Root, copy));
+            }
+        }
+
+        ClearSelection();
+
+        foreach (Element element in added)
+        {
+            Add(element);
+        }
+
+        Anchor = added[^1];
+
+        OnChanged();
+
+        return added.Count;
+    }
+
+    /// <summary>How far a pasted element lands from the one it was copied from.</summary>
+    private const int PasteOffset = 10;
+
     /// <summary>Deletes the selection.</summary>
     public void DeleteSelection()
     {

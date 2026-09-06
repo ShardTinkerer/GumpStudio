@@ -15,6 +15,7 @@ using GumpStudio.Core.Document;
 using GumpStudio.Core.Editing;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
+using GumpStudio.Core.Serialization;
 using GumpStudio.Plugins;
 
 namespace GumpStudio.App;
@@ -122,6 +123,10 @@ public sealed partial class MainWindow : Window, IDisposable
         ClickAsync("MenuGumpProperties", EditGumpPropertiesAsync);
         Click("MenuRemovePage", RemovePage);
 
+        ClickAsync("MenuCut", () => CopyAsync(cut: true));
+        ClickAsync("MenuCopy", () => CopyAsync(cut: false));
+        ClickAsync("MenuPaste", PasteAsync);
+
         ClickAsync("MenuOpen", OpenAsync);
         ClickAsync("MenuSave", () => SaveAsync(_session.DocumentPath));
         ClickAsync("MenuSaveAs", () => SaveAsync(null));
@@ -159,6 +164,10 @@ public sealed partial class MainWindow : Window, IDisposable
         Bind("Ctrl+Up", () => Reorder(_session.Canvas.BringForward, "forward"));
         Bind("Ctrl+Down", () => Reorder(_session.Canvas.SendBackward, "backward"));
         Bind("Ctrl+Shift+Down", () => Reorder(_session.Canvas.SendToBack, "back"));
+
+        BindAsync("Ctrl+X", () => CopyAsync(cut: true));
+        BindAsync("Ctrl+C", () => CopyAsync(cut: false));
+        BindAsync("Ctrl+V", PasteAsync);
 
         BindAsync("Ctrl+O", OpenAsync);
         BindAsync("Ctrl+S", () => SaveAsync(_session.DocumentPath));
@@ -198,6 +207,9 @@ public sealed partial class MainWindow : Window, IDisposable
         MenuItem forward = Item("Bring forward", () => Reorder(_session.Canvas.BringForward, "forward"));
         MenuItem backward = Item("Send backward", () => Reorder(_session.Canvas.SendBackward, "backward"));
         MenuItem back = Item("Send to back", () => Reorder(_session.Canvas.SendToBack, "back"));
+        MenuItem cut = Item("Cut", () => _ = GuardedAsync(() => CopyAsync(cut: true)));
+        MenuItem copy = Item("Copy", () => _ = GuardedAsync(() => CopyAsync(cut: false)));
+        MenuItem paste = Item("Paste", () => _ = GuardedAsync(PasteAsync));
         MenuItem delete = Item("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
         MenuItem moveToPage = new() { Header = "Move to page" };
 
@@ -234,6 +246,10 @@ public sealed partial class MainWindow : Window, IDisposable
                 backward,
                 back,
                 new Separator(),
+                cut,
+                copy,
+                paste,
+                new Separator(),
                 arrange,
                 moveToPage,
                 new Separator(),
@@ -261,6 +277,7 @@ public sealed partial class MainWindow : Window, IDisposable
             ungroup.IsEnabled = anyGroup;
             front.IsEnabled = forward.IsEnabled = backward.IsEnabled = back.IsEnabled = selected > 0;
             delete.IsEnabled = selected > 0;
+            cut.IsEnabled = copy.IsEnabled = selected > 0;
             arrange.IsEnabled = selected >= 2;
 
             FillMoveToPageMenu(moveToPage);
@@ -392,6 +409,98 @@ public sealed partial class MainWindow : Window, IDisposable
 
         RefreshAll();
         SetStatus(dissolved == 1 ? "Ungrouped." : $"Ungrouped {dissolved} groups.");
+    }
+
+    /// <summary>
+    /// Puts the selection on the clipboard, optionally removing it.
+    /// </summary>
+    /// <remarks>
+    /// As XML text rather than a serialised object graph. It survives between
+    /// instances, can be inspected by pasting it anywhere, and cannot carry
+    /// anything executable — which the original's <c>BinaryFormatter</c> payload
+    /// could, and which is a large part of why that format had to go.
+    /// </remarks>
+    private async Task CopyAsync(bool cut)
+    {
+        if (_session.Canvas.Selection.Count == 0)
+        {
+            SetStatus("Select something to copy.");
+
+            return;
+        }
+
+        if (Clipboard is not { } clipboard)
+        {
+            SetStatus("No clipboard is available.");
+
+            return;
+        }
+
+        int count = _session.Canvas.Selection.Count;
+
+        // Avalonia 12 replaced SetTextAsync with a data-transfer object that can
+        // carry several representations; text is the only one we offer.
+        //
+        // Deliberately not disposed: the clipboard takes ownership and may call
+        // back into it to serve the data, so releasing it here would be handing
+        // the system a payload we had already torn down.
+#pragma warning disable CA2000
+        DataTransfer payload = new();
+#pragma warning restore CA2000
+
+        payload.Add(DataTransferItem.CreateText(GumpXmlSerializer.ToFragment(_session.Canvas.Selection)));
+
+        await clipboard.SetDataAsync(payload).ConfigureAwait(true);
+
+        // Hands the data to the OS so it outlives this process. Windows only;
+        // elsewhere the clipboard is served by the owning application anyway and
+        // the call does nothing.
+        await clipboard.FlushAsync().ConfigureAwait(true);
+
+        if (cut)
+        {
+            _session.Canvas.DeleteSelection();
+        }
+
+        RefreshAll();
+        SetStatus(string.Create(
+            CultureInfo.InvariantCulture,
+            $"{(cut ? "Cut" : "Copied")} {count} element(s)."));
+    }
+
+    private async Task PasteAsync()
+    {
+        if (Clipboard is not { } clipboard)
+        {
+            SetStatus("No clipboard is available.");
+
+            return;
+        }
+
+        // The transfer object owns platform resources and must be disposed.
+        using IAsyncDataTransfer? transfer = await clipboard.TryGetDataAsync().ConfigureAwait(true);
+
+        string? text = transfer is null
+            ? null
+            : await transfer.TryGetTextAsync().ConfigureAwait(true);
+
+        IReadOnlyList<Element> elements = GumpXmlSerializer.FromFragment(text);
+
+        if (elements.Count == 0)
+        {
+            // The clipboard holds whatever the user last copied anywhere, so text
+            // that is not ours is an ordinary outcome, not a failure.
+            SetStatus("Nothing on the clipboard to paste.");
+
+            return;
+        }
+
+        int pasted = _session.Canvas.Paste(elements);
+
+        _session.MeasureActivePage();
+
+        RefreshAll();
+        SetStatus(string.Create(CultureInfo.InvariantCulture, $"Pasted {pasted} element(s)."));
     }
 
     /// <summary>

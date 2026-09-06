@@ -86,6 +86,77 @@ public static class GumpXmlSerializer
         return FromXml(XDocument.Load(reader));
     }
 
+    /// <summary>Root element of a loose group of elements, as put on the clipboard.</summary>
+    private const string FragmentName = "gumpstudio-elements";
+
+    /// <summary>
+    /// Serialises a loose set of elements, for the clipboard.
+    /// </summary>
+    /// <remarks>
+    /// The same writer the document format uses, so a copied element carries
+    /// everything a saved one does and nothing has to be kept in step separately.
+    /// Plain text on the clipboard rather than a binary blob: it survives between
+    /// instances, can be pasted into an editor to be read, and — unlike the
+    /// original's <c>BinaryFormatter</c> payload — cannot execute anything.
+    /// </remarks>
+    public static string ToFragment(IEnumerable<Element> elements)
+    {
+        ArgumentNullException.ThrowIfNull(elements);
+
+        XElement root = new(FragmentName, new XAttribute("version", CurrentVersion));
+
+        foreach (Element element in elements)
+        {
+            root.Add(WriteElement(element));
+        }
+
+        return root.ToString();
+    }
+
+    /// <summary>
+    /// Reads elements back from a clipboard fragment.
+    /// </summary>
+    /// <returns>
+    /// The elements, or an empty list when the text is not one of ours — the
+    /// clipboard holds arbitrary text and a failed paste must not be an error.
+    /// </returns>
+    public static IReadOnlyList<Element> FromFragment(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return [];
+        }
+
+        XElement root;
+
+        try
+        {
+            root = XElement.Parse(text, LoadOptions.None);
+        }
+        catch (System.Xml.XmlException)
+        {
+            return [];
+        }
+
+        if (!string.Equals(root.Name.LocalName, FragmentName, StringComparison.OrdinalIgnoreCase)
+            || ReadInt(root, "version", CurrentVersion) > CurrentVersion)
+        {
+            return [];
+        }
+
+        List<Element> elements = [];
+
+        foreach (XElement node in root.Elements())
+        {
+            if (ReadElement(node) is { } element)
+            {
+                elements.Add(element);
+            }
+        }
+
+        return elements;
+    }
+
     /// <summary>Serialises to an in-memory document, for tests and round-tripping.</summary>
     public static XDocument ToXml(GumpDocument document)
     {

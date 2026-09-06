@@ -153,7 +153,7 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 468 tests across the solution; 6 skip when the single-client
+Done. 484 tests across the solution; 6 skip when the single-client
 environment variables are unset, and the client-data theories skip entirely when
 no installation is configured, so CI stays green.
 
@@ -337,6 +337,34 @@ Decoding is serialised through a task chain now, results are cached
 nothing), and a request whose tile has since been recycled is dropped before it
 does any work rather than after.
 
+### Cut, copy and paste
+
+On the Edit menu, the context menu and the usual three shortcuts.
+
+Elements travel as **XML text**, written by the same serializer the document
+format uses, so a copied element carries everything a saved one does and there
+is no second format to keep in step. Text on the clipboard also means a copy
+survives between instances, can be read by pasting it into an editor, and cannot
+carry anything executable — which the original's `BinaryFormatter` payload could,
+and which is a large part of why that format had to go. Text that is not ours is
+an ordinary outcome, not an error: the clipboard holds whatever was last copied
+anywhere.
+
+Two departures from the original, both deliberate:
+
+- **A paste is offset** by ten pixels, or by one grid cell when snapping is on.
+  The original pasted at the original coordinates, so pressing paste twice
+  silently buried one copy under another with nothing on screen to say a second
+  had appeared. Use **Move to page** when the point is to keep the position.
+- **Elements are cloned on the way in.** The original added the clipboard's own
+  objects, so a second paste re-parented the first paste's elements instead of
+  duplicating them.
+
+Avalonia 12 replaced `SetTextAsync`/`GetTextAsync` with a data-transfer object.
+It is handed to the clipboard rather than disposed locally, because the clipboard
+takes ownership and may call back into it, and `FlushAsync` is called so a copy
+outlives the process on Windows.
+
 ### Aligning a selection, and the text-entry wash
 
 Two things the original had that the rewrite had dropped, both found by
@@ -480,7 +508,6 @@ elements before `page 1` already expresses the same thing.
   gump id. The same browser pattern would suit it — swatches instead of
   thumbnails — and `HueTable` already exposes the colours.
 - A **cliloc browser** for the HTML element's localised id.
-- Clipboard cut/copy/paste.
 - A plugin manager UI for enabling and ordering plugins; discovery currently
   loads everything it finds.
 - Drag-to-reorder in the element list. The four ordering commands cover the same
