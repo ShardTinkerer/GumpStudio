@@ -78,11 +78,21 @@ public class LayoutImportTests
         Assert.Equal("#1027027", command.Arguments);
     }
 
-    /// <summary>Captures are inconsistent about the closing delimiter.</summary>
+    /// <summary>
+    /// Captures are inconsistent about how many delimiters wrap the list.
+    /// </summary>
+    /// <remarks>
+    /// A doubled <c>@@</c> does not mean an empty first argument: the client runs
+    /// consecutive delimiters together the way <c>strtok</c> does. Reading it as
+    /// one left a cliloc whose only placeholder is <c>~1_TOKEN~</c> substituting
+    /// nothing, which is how it was noticed.
+    /// </remarks>
     [Theory]
     [InlineData("@0@10", "0@10")]
     [InlineData("@0@10@", "0@10")]
     [InlineData("@#1027027", "#1027027")]
+    [InlineData("@@#1072325", "#1072325")]
+    [InlineData("@@#1072325@@", "#1072325")]
     public void ReadsArgumentsWithOrWithoutAClosingDelimiter(string written, string expected)
     {
         LayoutParseResult result = LayoutStringParser.Parse(

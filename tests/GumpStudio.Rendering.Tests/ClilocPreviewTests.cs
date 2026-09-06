@@ -91,6 +91,33 @@ public class ClilocPreviewTests
     }
 
     /// <summary>
+    /// A run of delimiters is one separator, not an empty argument.
+    /// </summary>
+    /// <remarks>
+    /// Real captures write <c>@@#1072325</c> for a single argument. Treating the
+    /// gap as an empty first value fed nothing to <c>~1_TOKEN~</c> and the area
+    /// previewed blank.
+    /// </remarks>
+    [Fact]
+    public void TreatsARunOfDelimitersAsOneSeparator()
+    {
+        List<string> drawn = Render(
+            new HtmlElement
+            {
+                ContentKind = HtmlContentKind.Localized,
+                ClilocId = 1114513,
+                Arguments = "@#1072325",
+            },
+            clilocs: new()
+            {
+                [1114513] = "~1_TOKEN~",
+                [1072325] = "An escort to the New Haven Bank",
+            });
+
+        Assert.Contains("An escort to the New Haven Bank", drawn);
+    }
+
+    /// <summary>
     /// A placeholder with no argument is left as it stands.
     /// </summary>
     /// <remarks>

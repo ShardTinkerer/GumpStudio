@@ -281,9 +281,10 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The client numbers them from one and separates the values with <c>@</c>.
-    /// A placeholder with no argument is left as it stands rather than blanked,
-    /// so a missing value is visible instead of silently disappearing.
+    /// The client numbers them from one and separates the values with <c>@</c>,
+    /// running consecutive delimiters together. A placeholder with no argument is
+    /// left as it stands rather than blanked, so a missing value is visible
+    /// instead of silently disappearing.
     /// </para>
     /// <para>
     /// An argument of the form <c>#1234</c> is itself a cliloc id — the
@@ -293,7 +294,10 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
     /// </remarks>
     private string Substitute(string text, string arguments)
     {
-        string[] values = arguments.Split('@');
+        // Empty tokens are dropped, because the client runs consecutive
+        // delimiters together the way strtok does: `@@#1072325` names one
+        // argument, not an empty one followed by a real one.
+        string[] values = arguments.Split('@', StringSplitOptions.RemoveEmptyEntries);
         StringBuilder built = new(text.Length);
 
         for (int i = 0; i < text.Length; i++)

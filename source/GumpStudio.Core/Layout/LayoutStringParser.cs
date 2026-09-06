@@ -541,26 +541,21 @@ public static class LayoutStringParser
     /// The substitution arguments, without the delimiters the layout string uses.
     /// </summary>
     /// <remarks>
-    /// Captures are inconsistent about the closing delimiter — <c>@#1027027</c>
-    /// and <c>@0@10</c> both appear — so a trailing one is optional. The model
-    /// stores them separated by <c>@</c>, which is the form they arrive in.
+    /// <para>
+    /// The model stores them separated by <c>@</c>, which is the form they arrive
+    /// in. Captures are inconsistent about how many delimiters surround the list:
+    /// <c>@#1027027</c>, <c>@0@10</c> and <c>@@#1072325</c> all appear, and all
+    /// three name their first argument first.
+    /// </para>
+    /// <para>
+    /// So every leading and trailing delimiter is stripped, not just one. The
+    /// client tokenises the list the way <c>strtok</c> does, running consecutive
+    /// delimiters together, which is why a doubled <c>@@</c> does not mean an
+    /// empty first argument — reading it as one left a cliloc whose only
+    /// placeholder is <c>~1_TOKEN~</c> substituting nothing at all.
+    /// </para>
     /// </remarks>
-    private static string Arguments(string blob)
-    {
-        string value = blob.Trim();
-
-        if (value.StartsWith('@'))
-        {
-            value = value[1..];
-        }
-
-        if (value.EndsWith('@'))
-        {
-            value = value[..^1];
-        }
-
-        return value;
-    }
+    private static string Arguments(string blob) => blob.Trim().Trim('@');
 
     /// <summary>Every command name that is understood, for detection and diagnostics.</summary>
     private static readonly HashSet<string> Known = new(StringComparer.Ordinal)

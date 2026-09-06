@@ -754,8 +754,12 @@ the parser is there because of something in it:
   are filled with empty pages so page buttons keep pointing where the server
   meant. A ceiling of 255 stops a malformed capture asking for millions.
 - **A doubled space after a command name.** Runs of whitespace are one separator.
-- **`@0@10` with no closing delimiter**, alongside `@#1027027`. A trailing `@` is
-  optional.
+- **`@0@10` with no closing delimiter**, alongside `@#1027027` and `@@#1072325`.
+  Every leading and trailing delimiter is stripped, not just one, and a run of
+  them in the middle counts as a single separator — the client tokenises the list
+  the way `strtok` does. Reading a doubled `@@` as an empty first argument left
+  `<DIV ALIGN=CENTER>~1_TOKEN~</DIV>` substituting nothing, so a quest-offer gump
+  previewed with its title missing.
 - **A text block holding one empty entry**, indexed by nothing. A gump built
   entirely from clilocs has no strings of its own, so a missing or truncated text
   block is the ordinary case, not corruption.
