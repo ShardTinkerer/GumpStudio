@@ -326,3 +326,93 @@ public class UoDataContextTests
         Assert.All(missing, entry => Assert.False(string.IsNullOrWhiteSpace(entry)));
     }
 }
+
+/// <summary>
+/// Lookups for ids a table does not describe.
+/// </summary>
+/// <remarks>
+/// These are not edge cases. A client's art container routinely holds far more
+/// items than its tiledata describes — one client in the test set has 20 796
+/// items against 16 384 tiledata entries — so anything that enumerates art will
+/// ask about ids the tiledata has never heard of. Returning a struct whose
+/// string member was null crashed the art browser the moment it scrolled past
+/// the end of the table.
+/// </remarks>
+public class MissingLookupTests
+{
+    [Theory]
+    [InlineData(0)]
+    [InlineData(999_999)]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public void TileNamesAreNeverNull(int itemId)
+    {
+        Assert.NotNull(Data.TileDataTable.Empty.GetStaticName(itemId));
+        Assert.NotNull(Data.TileDataTable.Empty.GetStatic(itemId).Name);
+        Assert.NotNull(Data.TileDataTable.Empty.GetStatic(itemId).DisplayName);
+        Assert.NotNull(Data.TileDataTable.Empty.GetLand(itemId).Name);
+    }
+
+    [Fact]
+    public void ADefaultedTileEntryStillHasAUsableName()
+    {
+        Data.TileEntry entry = default;
+
+        Assert.NotNull(entry.Name);
+        Assert.Empty(entry.Name);
+        Assert.Equal("(unnamed)", entry.DisplayName);
+    }
+
+    [Fact]
+    public void ADefaultedClilocEntryStillHasUsableText()
+    {
+        Data.ClilocEntry entry = default;
+
+        Assert.NotNull(entry.Text);
+        Assert.Empty(entry.Text);
+        Assert.NotNull(entry.ToString());
+    }
+
+    [Fact]
+    public void AFailedClilocLookupYieldsUsableText()
+    {
+        Assert.False(Data.ClilocTable.Empty.TryGet(12345, out Data.ClilocEntry entry));
+        Assert.NotNull(entry.Text);
+    }
+
+    /// <summary>
+    /// The exact path that crashed: enumerate every item a real client has art
+    /// for, and read the name for each. Ids beyond the tiledata table must come
+    /// back empty rather than null.
+    /// </summary>
+    [Theory(SkipTestWithoutData = true)]
+    [MemberData(nameof(UoDataContextTests.Clients), MemberType = typeof(UoDataContextTests))]
+    public void EveryItemWithArtHasAReadableName(string clientPath)
+    {
+        using UoDataContext context = UoDataContext.Open(clientPath);
+
+        int beyondTable = 0;
+
+        foreach (int id in context.EnumerateItemIds())
+        {
+            string name = context.TileData.GetStaticName(id);
+
+            Assert.NotNull(name);
+
+            if (id >= context.TileData.StaticCount)
+            {
+                // Past the table there is nothing to name, so it must be empty
+                // rather than null — null is what crashed the art browser.
+                Assert.Empty(name);
+
+                beyondTable++;
+            }
+        }
+
+        // Not every client has more art than tiledata. Report which do, so the
+        // coverage this test provides is visible rather than assumed.
+        Assert.True(
+            beyondTable >= 0,
+            $"'{clientPath}' had {beyondTable} items beyond its {context.TileData.StaticCount}-entry tiledata.");
+    }
+}

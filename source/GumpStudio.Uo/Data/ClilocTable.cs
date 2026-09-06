@@ -153,11 +153,23 @@ public sealed class ClilocTable
 /// <summary>One localised string.</summary>
 /// <param name="Id">The id servers and gump scripts reference.</param>
 /// <param name="Flag">Whether the string is original, patched, or newly added.</param>
-/// <param name="Text">
-/// The text, which may contain <c>~1_NAME~</c> placeholders the server fills in.
+/// <param name="RawText">
+/// The text, or <see langword="null"/> for a defaulted entry. Read
+/// <see cref="Text"/> instead.
 /// </param>
-public readonly record struct ClilocEntry(int Id, ClilocEntryKind Flag, string Text)
+/// <remarks>
+/// <see cref="ClilocTable.TryGet"/> writes <c>default</c> on a miss, so a
+/// positional non-nullable <c>Text</c> would hand callers a null string whenever
+/// a lookup failed. The computed property keeps that from being possible.
+/// </remarks>
+public readonly record struct ClilocEntry(int Id, ClilocEntryKind Flag, string? RawText)
 {
+    /// <summary>
+    /// The text, which may contain <c>~1_NAME~</c> placeholders the server fills
+    /// in. Empty when the entry is absent, never null.
+    /// </summary>
+    public string Text => RawText ?? string.Empty;
+
     public override string ToString() => $"{Id}: {Text}";
 }
 

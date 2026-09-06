@@ -182,6 +182,13 @@ The static section length varies independently of the layout — clients in the
 test matrix ship 16 384, 32 768 and 65 536 statics — so the group count is
 derived from the remaining file length rather than assumed.
 
+**A client's art container routinely holds more items than its tiledata
+describes.** One shard client in use has 20 796 items with art against a
+16 384-entry tiledata table, so roughly a fifth of its art has no tile record at
+all. Anything that enumerates art will therefore ask about ids the table has
+never heard of; those lookups are normal and must return an empty name, not a
+null one.
+
 ## `cliloc.<lang>`
 
 ```

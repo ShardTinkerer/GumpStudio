@@ -142,23 +142,47 @@ public sealed class TileDataTable
         return Encoding.ASCII.GetString(name).Trim();
     }
 
-    /// <summary>Properties of a static item tile, by item id.</summary>
+    /// <summary>
+    /// Properties of a static item tile, by item id.
+    /// </summary>
+    /// <remarks>
+    /// Out-of-range ids are normal, not exceptional: a client's art container
+    /// routinely holds more items than its tiledata describes — one in the test
+    /// set has 20 796 items against 16 384 tiledata entries — so anything
+    /// enumerating art will ask about ids this table has never heard of.
+    /// </remarks>
     public TileEntry GetStatic(int itemId) =>
-        (uint)itemId < (uint)_statics.Length ? _statics[itemId] : default;
+        (uint)itemId < (uint)_statics.Length ? _statics[itemId] : TileEntry.Empty;
 
     /// <summary>Properties of a land tile.</summary>
     public TileEntry GetLand(int landId) =>
-        (uint)landId < (uint)_land.Length ? _land[landId] : default;
+        (uint)landId < (uint)_land.Length ? _land[landId] : TileEntry.Empty;
 
-    /// <summary>The display name for a static item, or an empty string.</summary>
+    /// <summary>The name for a static item, or an empty string. Never null.</summary>
     public string GetStaticName(int itemId) => GetStatic(itemId).Name;
 }
 
 /// <summary>One tile's properties.</summary>
 /// <param name="Flags">The tile's flag bitfield, widened to 64 bits for both layouts.</param>
-/// <param name="Name">The NUL-padded ASCII description, trimmed.</param>
-public readonly record struct TileEntry(ulong Flags, string Name)
+/// <param name="RawName">
+/// The NUL-padded ASCII description, trimmed, or <see langword="null"/> for a
+/// defaulted entry. Read <see cref="Name"/> instead.
+/// </param>
+/// <remarks>
+/// The name is exposed through a computed property rather than positionally
+/// because a struct is always constructible as <c>default</c>, and a positional
+/// <c>string Name</c> would then be null however carefully the table is written.
+/// That produced a crash the moment an art browser scrolled past the end of the
+/// tiledata table.
+/// </remarks>
+public readonly record struct TileEntry(ulong Flags, string? RawName)
 {
+    /// <summary>An entry for a tile the table does not describe.</summary>
+    public static TileEntry Empty { get; }
+
+    /// <summary>The tile's name. Empty when unknown, never null.</summary>
+    public string Name => RawName ?? string.Empty;
+
     /// <summary>The name, or a placeholder when the tile is unnamed.</summary>
-    public string DisplayName => string.IsNullOrEmpty(Name) ? "(unnamed)" : Name;
+    public string DisplayName => Name.Length == 0 ? "(unnamed)" : Name;
 }
