@@ -8,8 +8,9 @@ on Windows, Linux and macOS. It reads both classic `.mul` and modern `.uop`
 client data, so it works with clients from 2001 through to current.
 
 > **Status: alpha.** The editor is usable — you can place elements, edit their
-> properties, save, and export to POL, RunUO and Sphere — but several
-> conveniences from the old application are not built yet. See
+> properties, save, import a gump captured off the wire, and export raw client
+> layout, POL, RunUO and Sphere — but several conveniences from the old
+> application are not built yet. See
 > [docs/status.md](docs/status.md) for exactly what is and is not done.
 
 ## Why a rewrite
@@ -56,26 +57,42 @@ gumpstudio render --client "C:/path/to/UO" --in mygump.gump --out mygump.png
 # Export a server script
 gumpstudio export --in mygump.gump --name MyGump --format pol
 gumpstudio export --in mygump.gump --name MyGump --format runuo --out MyGump.cs
-gumpstudio export --in mygump.gump --name d_shop --format sphere-056 --out d_shop.scp
+gumpstudio export --in mygump.gump --name d_shop --format sphere --dialect 056 --out d_shop.scp
+
+# The client's own layout text, belonging to no particular server
+gumpstudio export --in mygump.gump --format layout
+
+# Read a gump captured off the wire back into a document
+gumpstudio import --in captured.txt --out captured.gump
+sniffer | gumpstudio import --out captured.gump
 ```
 
-Six formats are available: `pol`, `pol-layout`, `runuo`, `runuo-numeric`,
-`sphere-056` and `sphere-099`. Run `gumpstudio` with no arguments for the list.
+Four formats are available, each with its dialects:
+
+| Format | Dialects |
+|---|---|
+| `layout` | — the client's own layout text, with no server wrapper |
+| `pol` | `gump-package` (default), `layout-strings` |
+| `runuo` | `named` (default), `numeric` |
+| `sphere` | `056` (default), `099` |
+
+The ids earlier releases used still work: `pol-layout`, `runuo-numeric`,
+`sphere-056` and `sphere-099` select the same converter and dialect as before.
+Run `gumpstudio` with no arguments for the list.
 
 ## Building a release
 
 ```sh
-# Self-contained, with plugins discovered from the Plugins folder
+# Self-contained
 dotnet publish source/GumpStudio.App -c Release -r win-x64 --self-contained
 
 # Single native binary, no runtime to install
 pwsh eng/publish-aot.ps1 -Runtime win-x64
 ```
 
-The NativeAOT build compiles the three shipped exporters in, because a native
-image cannot load an assembly at runtime. Use the ordinary self-contained build
-if you need third-party plugins. On Windows it needs the MSVC toolchain — the
-"Desktop development with C++" workload.
+Both builds contain the same four converters, compiled in. On Windows the
+NativeAOT build needs the MSVC toolchain — the "Desktop development with C++"
+workload.
 
 ## Repository layout
 

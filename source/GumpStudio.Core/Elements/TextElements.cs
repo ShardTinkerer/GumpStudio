@@ -1,5 +1,55 @@
 namespace GumpStudio.Core.Elements;
 
+/// <summary>
+/// Which of the client's two font families text is previewed in.
+/// </summary>
+/// <remarks>
+/// A preview choice only. The gump protocol's text commands carry no font at all,
+/// so nothing an exporter writes changes with it — but a designer needs to see
+/// roughly what the player will, and the two families look nothing alike.
+/// </remarks>
+public enum GumpFontFamily
+{
+    /// <summary>The <c>unifont*.mul</c> faces. Thirteen on a current client.</summary>
+    Unicode,
+
+    /// <summary>The ten <c>fonts.mul</c> faces, which are the older UO look.</summary>
+    Ascii,
+}
+
+/// <summary>
+/// An element whose text is previewed in a chosen font.
+/// </summary>
+/// <remarks>
+/// The gump protocol's text commands carry no font, so this changes nothing an
+/// exporter writes — it decides only what the designer sees. Before it existed
+/// the renderer drew every localised area and text entry in Unicode font 0, the
+/// ornate blackletter face, which is a poor default for reading and is not what
+/// the client uses for body text.
+/// </remarks>
+public interface IFontedElement
+{
+    /// <summary>Which family the face comes from.</summary>
+    GumpFontFamily FontFamily { get; set; }
+
+    /// <summary>Index of the face within its family.</summary>
+    int FontIndex { get; set; }
+}
+
+/// <summary>Shared defaults for the elements that carry text.</summary>
+public static class TextElementDefaults
+{
+    /// <summary>
+    /// The face new text elements preview in.
+    /// </summary>
+    /// <remarks>
+    /// Unicode 1, the plain face. Unicode 0 is an ornate blackletter that is hard
+    /// to read at gump sizes, and it was what every localised area and text entry
+    /// was drawn in before the font could be chosen at all.
+    /// </remarks>
+    public const int FontIndex = 1;
+}
+
 /// <summary>Whether an HTML area holds literal markup or a cliloc reference.</summary>
 public enum HtmlContentKind
 {
@@ -11,8 +61,11 @@ public enum HtmlContentKind
 }
 
 /// <summary>A scrollable HTML area, optionally backed by a cliloc string.</summary>
-public sealed class HtmlElement : ResizableElement
+public sealed class HtmlElement : ResizableElement, IFontedElement
 {
+    private int _fontIndex = TextElementDefaults.FontIndex;
+    private GumpFontFamily _fontFamily;
+
     private string _html = string.Empty;
     private int _clilocId = 1000000;
     private bool _showScrollbar;
@@ -86,10 +139,26 @@ public sealed class HtmlElement : ResizableElement
         set => Set(ref _arguments, value ?? string.Empty);
     }
 
+    /// <inheritdoc />
+    public int FontIndex
+    {
+        get => _fontIndex;
+        set => Set(ref _fontIndex, value);
+    }
+
+    /// <inheritdoc />
+    public GumpFontFamily FontFamily
+    {
+        get => _fontFamily;
+        set => Set(ref _fontFamily, value);
+    }
+
     protected override void CopyTo(Element target)
     {
         HtmlElement clone = (HtmlElement)target;
 
+        clone._fontIndex = _fontIndex;
+        clone._fontFamily = _fontFamily;
         clone._html = _html;
         clone._clilocId = _clilocId;
         clone._showScrollbar = _showScrollbar;
@@ -110,11 +179,12 @@ public sealed class HtmlElement : ResizableElement
 }
 
 /// <summary>A run of text drawn in one of the client's bitmap fonts.</summary>
-public sealed class LabelElement : Element
+public sealed class LabelElement : Element, IFontedElement
 {
     private string _text = "Label";
     private int _hue;
-    private int _fontIndex;
+    private int _fontIndex = TextElementDefaults.FontIndex;
+    private GumpFontFamily _fontFamily;
     private bool _cropped;
 
     public override string TypeName => "Label";
@@ -141,11 +211,18 @@ public sealed class LabelElement : Element
         set => Set(ref _hue, value);
     }
 
-    /// <summary>Index into the client's Unicode font set.</summary>
+    /// <inheritdoc />
     public int FontIndex
     {
         get => _fontIndex;
         set => Set(ref _fontIndex, value);
+    }
+
+    /// <inheritdoc />
+    public GumpFontFamily FontFamily
+    {
+        get => _fontFamily;
+        set => Set(ref _fontFamily, value);
     }
 
     /// <summary>True to clip the text to the element's bounds rather than let it overflow.</summary>
@@ -162,6 +239,7 @@ public sealed class LabelElement : Element
         clone._text = _text;
         clone._hue = _hue;
         clone._fontIndex = _fontIndex;
+        clone._fontFamily = _fontFamily;
         clone._cropped = _cropped;
     }
 

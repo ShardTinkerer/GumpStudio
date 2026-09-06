@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Server-script converters: raw client layout, POL, RunUO and Sphere.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GumpStudio.Core/GumpStudio.Core.csproj" />
+  </ItemGroup>
+
+</Project>

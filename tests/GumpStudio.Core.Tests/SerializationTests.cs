@@ -161,6 +161,71 @@ public class GumpXmlSerializerTests
             GumpXmlSerializer.ToXml(reloaded).ToString());
     }
 
+    /// <summary>
+    /// The preview font survives a save and load, for every element that has one.
+    /// </summary>
+    /// <remarks>
+    /// Nothing an exporter writes depends on it, which is exactly why a
+    /// round-trip test is worth having: a property that reaches no output is one
+    /// that can be dropped by the serializer without any other test noticing.
+    /// </remarks>
+    [Fact]
+    public void RoundTripsThePreviewFont()
+    {
+        GumpDocument original = new();
+
+        original.Pages[0].Root.Add(new LabelElement
+        {
+            Text = "label",
+            FontFamily = GumpFontFamily.Ascii,
+            FontIndex = 3,
+        });
+
+        original.Pages[0].Root.Add(new HtmlElement { Html = "html", FontIndex = 6 });
+
+        original.Pages[0].Root.Add(new TextEntryElement
+        {
+            InitialText = "entry",
+            FontFamily = GumpFontFamily.Ascii,
+            FontIndex = 9,
+        });
+
+        GumpDocument reloaded = GumpXmlSerializer.FromXml(GumpXmlSerializer.ToXml(original));
+        List<IFontedElement> fonts = [.. reloaded.Pages[0].Leaves().OfType<IFontedElement>()];
+
+        Assert.Equal(
+            [(GumpFontFamily.Ascii, 3), (GumpFontFamily.Unicode, 6), (GumpFontFamily.Ascii, 9)],
+            fonts.Select(f => (f.FontFamily, f.FontIndex)));
+    }
+
+    /// <summary>
+    /// A file written before the font was selectable keeps each element's default.
+    /// </summary>
+    /// <remarks>
+    /// Labels always stored a font, so they keep whatever they had. HTML areas
+    /// and text entries never did, and must not be forced to zero — that is the
+    /// ornate face the selectable font exists to get away from.
+    /// </remarks>
+    [Fact]
+    public void ReadsAnOlderFileWithoutAFontAttribute()
+    {
+        GumpDocument document = GumpXmlSerializer.FromXml(XDocument.Parse(
+            """
+            <gump version="4">
+              <properties />
+              <page name="Page 0">
+                <label hue="0" font="0" cropped="false" />
+                <html kind="Html" clilocId="1000000" scrollbar="false" background="false" color="0" />
+              </page>
+            </gump>
+            """));
+
+        List<Element> elements = [.. document.Pages[0].Leaves()];
+
+        Assert.Equal(0, ((LabelElement)elements[0]).FontIndex);
+        Assert.Equal(TextElementDefaults.FontIndex, ((HtmlElement)elements[1]).FontIndex);
+    }
+
     [Fact]
     public void RoundTripsThroughAFile()
     {

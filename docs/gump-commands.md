@@ -21,7 +21,7 @@ near-identical entries.
 | Command | Modelled as |
 |---|---|
 | `page` | A `GumpPage` |
-| `group` / `endgroup` | `CheckboxElement.GroupId` on the radios; the exporter opens and closes the run |
+| `group` / `endgroup` | `CheckboxElement.GroupId` on the radios; the layout builder opens and closes the run |
 | `nomove` / `noclose` / `nodispose` | `GumpProperties.Movable` / `Closable` / `Disposable` |
 | `mastergump` | `GumpProperties.MasterGumpId` |
 | `toggleupperwordcase` | `GumpProperties.UpperWordCase` |
@@ -77,9 +77,9 @@ that renders the wrong string.
 `tooltip` and `itemproperty` have no coordinates. The client applies them to
 whichever element it created most recently. That makes them positional in the
 layout string but a plain per-element property everywhere else, so the editor
-stores them on the element and the exporter emits them immediately after their
-own element's command. An exporter cannot then attach one to the wrong element by
-reordering its output.
+stores them on the element and the layout builder emits them immediately after
+their own element's command. A converter cannot then attach one to the wrong
+element by reordering its output.
 
 ### A cropped label owns its rectangle
 
@@ -122,20 +122,30 @@ across the whole document, so a second page whose first radio matched the
 previous page's group never got its `group` command and every radio on it
 silently fell into group 0.
 
-## What each exporter can express
+## Reading the commands back
 
-Six formats ship. Two are raw layout syntax and can say everything the client
-understands; the rest are fixed APIs with gaps.
+`LayoutStringParser` understands every command in the table above, which is what
+makes importing a gump captured off the wire possible — see
+[status.md](status.md#phase-8--importing-a-gump-captured-off-the-wire-). The
+mapping runs in both directions, so a command this page lists is one the editor
+can both write and read.
 
-| Format | Coverage |
+## What each converter can express
+
+Four converters ship. Every command above is modelled in the layout IR
+(`GumpStudio.Core.Layout`) regardless, so a gap here is a gap in the *target*,
+never in what the editor understood.
+
+| Converter and dialect | Coverage |
 |---|---|
-| `pol-layout` | Everything. Raw layout strings. |
-| `sphere-056` | Everything. Raw layout strings. |
-| `pol` | The original element set. The rest is commented out beside the closest call. |
-| `runuo` / `runuo-numeric` | Everything except `tilepicasgumppic`, which no core exposes. `AddPicInPic`, `AddMasterGump`, `AddECHandleInput` and `AddLabelCropped` need a ServUO-era core. |
-| `sphere-099` | A fixed set of script functions. See below. |
+| `layout` | Everything. It *is* the client's grammar. |
+| `pol` / `layout-strings` | Everything. Raw layout strings. |
+| `sphere` / `056` | Everything. Raw layout strings. |
+| `pol` / `gump-package` | The original element set. The rest is commented out beside the closest call. |
+| `runuo` (either dialect) | Everything except `tilepicasgumppic`, which no core exposes. `AddPicInPic`, `AddMasterGump`, `AddECHandleInput` and `AddLabelCropped` need a ServUO-era core. Radio grouping is not emitted: no core exposes the client's `group`. |
+| `sphere` / `099` | A fixed set of script functions. See below. |
 
-Where an exporter is missing only a *refinement* — a partial hue, a crop
+Where a converter is missing only a *refinement* — a partial hue, a crop
 rectangle, a tile overlay on a button — it emits the nearest thing it does have
 and notes what was lost. Dropping the whole command instead would delete a
 visible element from the gump, which is a far worse answer than drawing it
@@ -148,7 +158,7 @@ command is written as a comment rather than as a call that would not run.
 ## What the POL gump package cannot express
 
 The `:gumps:gumps` distro package has a `GF*` function for the original element
-set only. For everything else the exporter emits the layout-string form commented
+set only. For everything else the converter emits the layout-string form commented
 out, beside the closest call it does have — which is what the original did for
 `gumppictiled`:
 

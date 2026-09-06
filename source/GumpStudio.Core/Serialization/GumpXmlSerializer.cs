@@ -397,6 +397,7 @@ public static class GumpXmlSerializer
                 break;
 
             case HtmlElement html:
+                WriteFont(node, html);
                 node.SetAttributeValue("kind", html.ContentKind);
                 node.SetAttributeValue("clilocId", html.ClilocId);
                 node.SetAttributeValue("scrollbar", html.ShowScrollbar);
@@ -417,12 +418,13 @@ public static class GumpXmlSerializer
 
             case LabelElement label:
                 node.SetAttributeValue("hue", label.Hue);
-                node.SetAttributeValue("font", label.FontIndex);
+                WriteFont(node, label);
                 node.SetAttributeValue("cropped", label.Cropped);
                 node.Add(new XElement("text", label.Text));
                 break;
 
             case TextEntryElement entry:
+                WriteFont(node, entry);
                 node.SetAttributeValue("hue", entry.Hue);
                 node.SetAttributeValue("entryId", entry.EntryId);
                 node.SetAttributeValue("maxLength", entry.MaxLength);
@@ -554,6 +556,7 @@ public static class GumpXmlSerializer
                 break;
 
             case HtmlElement html:
+                ReadFont(node, html);
                 html.ContentKind = ReadEnum(node, "kind", HtmlContentKind.Html);
                 html.ClilocId = ReadInt(node, "clilocId", html.ClilocId);
                 html.ShowScrollbar = ReadBool(node, "scrollbar", false);
@@ -565,11 +568,12 @@ public static class GumpXmlSerializer
 
             case LabelElement label:
                 label.Hue = ReadInt(node, "hue", 0);
-                label.FontIndex = ReadInt(node, "font", 0);
+                ReadFont(node, label);
                 label.Text = (string?)node.Element("text") ?? string.Empty;
                 break;
 
             case TextEntryElement entry:
+                ReadFont(node, entry);
                 entry.Hue = ReadInt(node, "hue", 0);
                 entry.EntryId = ReadInt(node, "entryId", 0);
                 entry.MaxLength = ReadInt(node, "maxLength", 0);
@@ -606,6 +610,38 @@ public static class GumpXmlSerializer
         // Set last: a radio's setter clears its siblings, so the group must be
         // known first.
         checkbox.IsChecked = ReadBool(node, "checked", false);
+    }
+
+    /// <summary>
+    /// Writes the preview font.
+    /// </summary>
+    /// <remarks>
+    /// The family is written only when it is not the default, so a document that
+    /// never leaves Unicode stays byte-comparable with one written before the
+    /// family existed.
+    /// </remarks>
+    private static void WriteFont(XElement node, IFontedElement element)
+    {
+        node.SetAttributeValue("font", element.FontIndex);
+
+        if (element.FontFamily != GumpFontFamily.Unicode)
+        {
+            node.SetAttributeValue("fontFamily", element.FontFamily);
+        }
+    }
+
+    /// <summary>
+    /// Reads the preview font.
+    /// </summary>
+    /// <remarks>
+    /// A file written before the font was selectable carries no attribute for the
+    /// elements that had none, so each keeps its own default rather than being
+    /// forced to zero.
+    /// </remarks>
+    private static void ReadFont(XElement node, IFontedElement element)
+    {
+        element.FontIndex = ReadInt(node, "font", element.FontIndex);
+        element.FontFamily = ReadEnum(node, "fontFamily", GumpFontFamily.Unicode);
     }
 
     private static int ReadInt(XElement node, string name, int fallback) =>

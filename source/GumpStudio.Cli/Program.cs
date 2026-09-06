@@ -3,6 +3,8 @@ using System.Globalization;
 using GumpStudio.Core.Document;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
+using GumpStudio.Converters;
+using GumpStudio.Core.Layout;
 using GumpStudio.Core.Legacy;
 using GumpStudio.Core.Primitives;
 using GumpStudio.Core.Serialization;
@@ -39,6 +41,7 @@ internal static class Program
                 "render" => Render(args[1..]),
                 "sample" => Sample(args[1..]),
                 "export" => Export(args[1..]),
+                "import" => Import(args[1..]),
                 "help" or "--help" or "-h" => PrintUsage(),
                 _ => Fail($"Unknown command '{args[0]}'."),
             };
@@ -245,27 +248,21 @@ internal static class Program
         return 0;
     }
 
-    /// <summary>Every exporter the CLI can drive, by the id it is named with.</summary>
+    /// <summary>
+    /// The ids earlier releases used, mapped onto a converter and a dialect.
+    /// </summary>
     /// <remarks>
-    /// The application discovers these from disk through the plugin loader. The
-    /// CLI references them directly instead: it is a build-time tool, and going
-    /// through an <c>AssemblyLoadContext</c> would buy it nothing.
+    /// The six of them are a published surface — they are in the README and in
+    /// this tool's own help — so scripts that use them keep working. The current
+    /// form is <c>--format pol --dialect layout-strings</c>.
     /// </remarks>
-    private static readonly Dictionary<string, Func<IGumpExporter>> Exporters =
+    private static readonly Dictionary<string, (string Converter, string Dialect)> LegacyFormats =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["pol"] = () => new GumpStudio.Plugins.Pol.PolExporter(
-                GumpStudio.Plugins.Pol.PolScriptStyle.GumpPackage),
-            ["pol-layout"] = () => new GumpStudio.Plugins.Pol.PolExporter(
-                GumpStudio.Plugins.Pol.PolScriptStyle.LayoutStrings),
-            ["runuo"] = () => new GumpStudio.Plugins.RunUo.RunUoExporter(
-                GumpStudio.Plugins.RunUo.RunUoButtonIdStyle.Named),
-            ["runuo-numeric"] = () => new GumpStudio.Plugins.RunUo.RunUoExporter(
-                GumpStudio.Plugins.RunUo.RunUoButtonIdStyle.Numeric),
-            ["sphere-056"] = () => new GumpStudio.Plugins.Sphere.SphereExporter(
-                GumpStudio.Plugins.Sphere.SphereDialect.Revision),
-            ["sphere-099"] = () => new GumpStudio.Plugins.Sphere.SphereExporter(
-                GumpStudio.Plugins.Sphere.SphereDialect.Modern),
+            ["pol-layout"] = ("pol", PolConverter.LayoutStrings),
+            ["runuo-numeric"] = ("runuo", RunUoConverter.Numeric),
+            ["sphere-056"] = ("sphere", SphereConverter.Revision),
+            ["sphere-099"] = ("sphere", SphereConverter.Modern),
         };
 
     /// <summary>Exports a document as a server-side script.</summary>
@@ -277,24 +274,38 @@ internal static class Program
         }
 
         string format = options.Format ?? "pol";
+        string? dialect = options.Dialect;
 
-        if (!Exporters.TryGetValue(format, out Func<IGumpExporter>? create))
+        if (LegacyFormats.TryGetValue(format, out (string Converter, string Dialect) legacy))
+        {
+            format = legacy.Converter;
+            dialect ??= legacy.Dialect;
+        }
+
+        if (GumpConverters.Find(format) is not { } converter)
+        {
+            return Fail($"Unknown format '{format}'. Available: {AvailableFormats()}.");
+        }
+
+        if (dialect is not null
+            && converter.Dialects.Count > 0
+            && !converter.Dialects.Any(d => string.Equals(d.Id, dialect, StringComparison.OrdinalIgnoreCase)))
         {
             return Fail(
-                $"Unknown format '{format}'. Available: {string.Join(", ", Exporters.Keys.Order(StringComparer.Ordinal))}.");
+                $"Unknown dialect '{dialect}' for '{converter.Id}'. Available: "
+                + string.Join(", ", converter.Dialects.Select(d => d.Id)) + ".");
         }
 
         GumpDocument document = IsXml(options.Input)
             ? GumpXmlSerializer.Load(options.Input)
             : LegacyGumpImporter.ImportDocument(options.Input);
 
-        IGumpExporter exporter = create();
-
-        string script = exporter.Export(
+        string script = converter.Export(
             document,
             new GumpExportOptions
             {
                 GumpName = options.Name ?? "MyGump",
+                Dialect = dialect,
             });
 
         if (options.Output is null)
@@ -309,6 +320,59 @@ internal static class Program
 
         return 0;
     }
+
+    /// <summary>
+    /// Reads a gump captured off the wire and saves it as a document.
+    /// </summary>
+    /// <remarks>
+    /// Packet-sniffing tools dump the layout string a server sent, which is the
+    /// same grammar the <c>layout</c> format writes. Reading from standard input
+    /// when no file is given means a capture can be piped straight in.
+    /// </remarks>
+    private static int Import(string[] args)
+    {
+        if (ParseOptions(args) is not { } options)
+        {
+            return Fail("import takes --in <file.txt>, or reads standard input.");
+        }
+
+        string text = options.Input is null
+            ? Console.In.ReadToEnd()
+            : File.ReadAllText(options.Input);
+
+        // No LooksLikeLayout guard here on purpose. That heuristic is for
+        // deciding whether to volunteer an import from the clipboard; naming a
+        // file is stated intent, and a one-command capture is still a capture.
+        // Producing nothing is what makes an import a failure.
+        LayoutImportResult result = GumpLayoutReader.Import(text);
+
+        foreach (string warning in result.Warnings)
+        {
+            Console.Error.WriteLine($"warning: {warning}");
+        }
+
+        int elements = result.Document.Pages.Sum(page => page.Leaves().Count());
+
+        if (elements == 0)
+        {
+            return Fail("No elements were found in that layout.");
+        }
+
+        string output = options.Output ?? "imported.gump";
+
+        GumpXmlSerializer.Save(result.Document, output);
+
+        Console.WriteLine(
+            $"Wrote {output}: {elements} elements across {result.Document.PageCount} pages.");
+
+        return 0;
+    }
+
+    /// <summary>The formats and their dialects, for help and error messages.</summary>
+    private static string AvailableFormats() =>
+        string.Join(", ", GumpConverters.All.Select(c => c.Dialects.Count == 0
+            ? c.Id
+            : c.Id + " (" + string.Join(" | ", c.Dialects.Select(d => d.Id)) + ")"));
 
     /// <summary>Distinguishes the new XML format from a legacy binary one.</summary>
     private static bool IsXml(string path)
@@ -375,6 +439,11 @@ internal static class Program
                     i++;
                     break;
 
+                case "--dialect" when value is not null:
+                    options = options with { Dialect = value };
+                    i++;
+                    break;
+
                 case "--name" when value is not null:
                     options = options with { Name = value };
                     i++;
@@ -418,15 +487,22 @@ internal static class Program
                               [--hue <n>] [--partial-hue] [--out <file.png>]
               gumpstudio render --client <path> --in <file.gump> [--page <n>] [--out <file.png>]
               gumpstudio sample [--out <file.gump>]
-              gumpstudio export --in <file.gump> [--format <id>] [--name <n>] [--out <file>]
+              gumpstudio export --in <file.gump> [--format <id>] [--dialect <id>]
+                                [--name <n>] [--out <file>]
+              gumpstudio import [--in <file.txt>] [--out <file.gump>]
 
-            Export formats:
-              pol            POL gump-package calls (the default)
-              pol-layout     POL layout strings
-              runuo          RunUO / ServUO C# gump, named button ids
-              runuo-numeric  RunUO / ServUO C# gump, numeric button ids
-              sphere-056     Sphere 0.56 / Revisions
-              sphere-099     Sphere 0.99 / 1.0
+            Export formats, with their dialects:
+              layout   the client's own layout text, with no server wrapper
+              pol      POL script            gump-package (default) | layout-strings
+              runuo    RunUO / ServUO C#     named (default) | numeric
+              sphere   Sphere script         056 (default) | 099
+
+            The earlier ids still work: pol-layout, runuo-numeric, sphere-056 and
+            sphere-099 select the same converter and dialect as before.
+
+            import reads the layout text a packet-sniffing tool dumps — the same
+            grammar the layout format writes — and reads standard input when no
+            --in is given.
 
             Ids accept decimal or 0x-prefixed hexadecimal.
             Hues are one-based, matching the values gump scripts use; 0 means none.
@@ -446,5 +522,6 @@ internal static class Program
         string? Input = null,
         int Page = 0,
         string? Format = null,
-        string? Name = null);
+        string? Name = null,
+        string? Dialect = null);
 }

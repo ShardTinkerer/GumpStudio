@@ -1,11 +1,14 @@
 using System.Globalization;
 
 using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 
 using CommunityToolkit.Mvvm.Input;
 
@@ -16,7 +19,6 @@ using GumpStudio.Core.Editing;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
 using GumpStudio.Core.Serialization;
-using GumpStudio.Plugins;
 
 namespace GumpStudio.App;
 
@@ -31,8 +33,34 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly ItemsControl _toolbox = null!;
     private readonly TextBlock _status = null!;
     private readonly MenuItem _exportMenu = null!;
-    private readonly MenuItem _pluginsMenu = null!;
     private readonly MenuItem _moveToPageMenu = null!;
+
+    /// <summary>
+    /// Width of a row in the hue and font dropdowns.
+    /// </summary>
+    /// <remarks>
+    /// Fixed so the popup cannot resize while it is scrolled. Wide enough for a
+    /// swatch and the longest hue name that is worth reading in full.
+    /// </remarks>
+    private const double PickerRowWidth = 240;
+
+    /// <summary>Widest a font sample may draw before it is scaled down.</summary>
+    private const double PickerSampleWidth = 130;
+
+    /// <summary>
+    /// Width of the preview beside a picker field.
+    /// </summary>
+    /// <remarks>
+    /// A hue needs only a swatch, but a font sample is a line of text and is
+    /// unreadable in the same space — so the two are sized differently rather
+    /// than sharing one width that suits neither.
+    /// </remarks>
+    private const double HuePreviewWidth = 46;
+
+    private const double FontPreviewWidth = 124;
+
+    private IReadOnlyList<PickerEntry>? _hueEntries;
+    private IReadOnlyList<PickerEntry>? _fontEntries;
 
     private bool _suppressSelectionSync;
     private List<Element>? _listedElements;
@@ -48,7 +76,6 @@ public sealed partial class MainWindow : Window, IDisposable
         _toolbox = this.FindControl<ItemsControl>("Toolbox")!;
         _status = this.FindControl<TextBlock>("StatusText")!;
         _exportMenu = this.FindControl<MenuItem>("MenuExport")!;
-        _pluginsMenu = this.FindControl<MenuItem>("MenuPlugins")!;
         _moveToPageMenu = this.FindControl<MenuItem>("MenuMoveToPage")!;
 
         // Filled as the Page menu opens rather than kept in sync: a disabled
@@ -64,7 +91,6 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _session.DocumentChanged += (_, _) => { _listedElements = null; RefreshAll(); };
         _session.PageChanged += (_, _) => { _listedElements = null; RefreshAll(); };
-        _session.Notified += (_, n) => SetStatus(n.Message);
 
         BuildToolbox();
         WireMenus();
@@ -76,9 +102,7 @@ public sealed partial class MainWindow : Window, IDisposable
 
         LoadGridSettings();
 
-        LoadPlugins();
         BuildExportMenu();
-        BuildPluginMenu();
 
         RefreshAll();
 
@@ -131,6 +155,7 @@ public sealed partial class MainWindow : Window, IDisposable
         ClickAsync("MenuSave", () => SaveAsync(_session.DocumentPath));
         ClickAsync("MenuSaveAs", () => SaveAsync(null));
         ClickAsync("MenuImportLegacy", ImportLegacyAsync);
+        ClickAsync("MenuImportLayout", ImportLayoutAsync);
         ClickAsync("MenuSetClient", () => ChooseClientAsync(force: true));
     }
 
@@ -145,19 +170,28 @@ public sealed partial class MainWindow : Window, IDisposable
     /// and the rest all did nothing. These bindings are what actually run them.
     /// </para>
     /// <para>
-    /// They live on the window, so a control that has already handled the key —
-    /// a text box swallowing Ctrl+A or Delete while the caret is in it — stops
-    /// the event before it arrives here.
+    /// They live on the window, and a window <c>KeyBinding</c> in Avalonia 12
+    /// runs <em>even when the focused control has already marked the key
+    /// handled</em> — a <see cref="TextBox"/> sets <c>Handled</c> for Ctrl+C,
+    /// Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z and Delete and is overridden anyway. So the
+    /// ones a text box owns check focus themselves; see <see cref="IsEditingText"/>.
     /// </para>
     /// </remarks>
     private void BindShortcuts()
     {
+        // These belong to whatever text box has the caret when one does.
+        Bind("Ctrl+Z", () => { _session.History.Undo(); RefreshAll(); }, TextEditing.Yields);
+        Bind("Ctrl+Y", () => { _session.History.Redo(); RefreshAll(); }, TextEditing.Yields);
+        Bind("Ctrl+Shift+Z", () => { _session.History.Redo(); RefreshAll(); }, TextEditing.Yields);
+        Bind("Ctrl+A", () => { _session.Canvas.SelectAll(); RefreshAll(); }, TextEditing.Yields);
+        Bind("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); }, TextEditing.Yields);
+
+        BindAsync("Ctrl+X", () => CopyAsync(cut: true), TextEditing.Yields);
+        BindAsync("Ctrl+C", () => CopyAsync(cut: false), TextEditing.Yields);
+        BindAsync("Ctrl+V", PasteAsync, TextEditing.Yields);
+
+        // These mean the same thing wherever the keyboard happens to be.
         Bind("Ctrl+N", () => _session.NewDocument());
-        Bind("Ctrl+Z", () => { _session.History.Undo(); RefreshAll(); });
-        Bind("Ctrl+Y", () => { _session.History.Redo(); RefreshAll(); });
-        Bind("Ctrl+Shift+Z", () => { _session.History.Redo(); RefreshAll(); });
-        Bind("Ctrl+A", () => { _session.Canvas.SelectAll(); RefreshAll(); });
-        Bind("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
         Bind("Ctrl+G", GroupSelection);
         Bind("Ctrl+Shift+G", UngroupSelection);
         Bind("Ctrl+Shift+Up", () => Reorder(_session.Canvas.BringToFront, "front"));
@@ -165,28 +199,64 @@ public sealed partial class MainWindow : Window, IDisposable
         Bind("Ctrl+Down", () => Reorder(_session.Canvas.SendBackward, "backward"));
         Bind("Ctrl+Shift+Down", () => Reorder(_session.Canvas.SendToBack, "back"));
 
-        BindAsync("Ctrl+X", () => CopyAsync(cut: true));
-        BindAsync("Ctrl+C", () => CopyAsync(cut: false));
-        BindAsync("Ctrl+V", PasteAsync);
-
         BindAsync("Ctrl+O", OpenAsync);
         BindAsync("Ctrl+S", () => SaveAsync(_session.DocumentPath));
         BindAsync("Ctrl+Shift+S", () => SaveAsync(null));
     }
 
-    private void Bind(string gesture, Action action) =>
+    /// <summary>Whether a shortcut steps aside while text is being edited.</summary>
+    private enum TextEditing
+    {
+        /// <summary>The shortcut means the same thing wherever focus is.</summary>
+        Ignores,
+
+        /// <summary>A focused text box owns this key, so the window does nothing.</summary>
+        Yields,
+    }
+
+    /// <summary>
+    /// Whether a text box currently has the keyboard.
+    /// </summary>
+    /// <remarks>
+    /// A window <c>KeyBinding</c> in Avalonia 12 runs <em>even when the focused
+    /// control has already marked the key handled</em> — verified against a
+    /// headless <see cref="TextBox"/>, which sets <c>Handled</c> for Ctrl+C,
+    /// Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z and Delete and is overridden anyway. So the
+    /// shortcuts have to check focus themselves; there is nothing to opt into
+    /// that makes bubbling stop.
+    /// </remarks>
+    private bool IsEditingText() =>
+        FocusManager?.GetFocusedElement() is TextBox;
+
+    /// <summary>
+    /// Registers one shortcut.
+    /// </summary>
+    /// <remarks>
+    /// Yielding is expressed as <c>CanExecute</c>, not as an early return from the
+    /// command. A <see cref="KeyBinding"/> marks the key handled whenever it
+    /// executes, so a command that runs and does nothing still swallows the
+    /// keystroke — which left Ctrl+C in a property field copying nothing at all
+    /// instead of copying the element. Refusing to execute lets the key reach the
+    /// text box that should have had it.
+    /// </remarks>
+    private void Bind(string gesture, Action action, TextEditing editing = TextEditing.Ignores) =>
         KeyBindings.Add(new KeyBinding
         {
             Gesture = KeyGesture.Parse(gesture),
-            Command = new RelayCommand(() => Guarded(action)),
+            Command = new RelayCommand(() => Guarded(action), () => Allows(editing)),
         });
 
-    private void BindAsync(string gesture, Func<Task> action) =>
+    private void BindAsync(
+        string gesture, Func<Task> action, TextEditing editing = TextEditing.Ignores) =>
         KeyBindings.Add(new KeyBinding
         {
             Gesture = KeyGesture.Parse(gesture),
-            Command = new AsyncRelayCommand(() => GuardedAsync(action)),
+            Command = new AsyncRelayCommand(() => GuardedAsync(action), () => Allows(editing)),
         });
+
+    /// <summary>Whether a shortcut may run, given where the keyboard is.</summary>
+    private bool Allows(TextEditing editing) =>
+        editing == TextEditing.Ignores || !IsEditingText();
 
     /// <summary>
     /// Builds the canvas context menu.
@@ -816,6 +886,9 @@ public sealed partial class MainWindow : Window, IDisposable
             PropertyEditorKind.Choice => BuildChoiceEditor(element, row),
             PropertyEditorKind.GumpId => BuildBrowsableIdEditor(element, row, ArtBrowserKind.Gump),
             PropertyEditorKind.ItemId => BuildBrowsableIdEditor(element, row, ArtBrowserKind.Item),
+            PropertyEditorKind.Color => BuildColorEditor(element, row),
+            PropertyEditorKind.Hue => BuildPickerEditor(element, row, HueEntries()),
+            PropertyEditorKind.Font => BuildPickerEditor(element, row, FontEntries()),
             _ => BuildTextEditor(element, row),
         };
 
@@ -892,6 +965,340 @@ public sealed partial class MainWindow : Window, IDisposable
         return layout;
     }
 
+    /// <summary>
+    /// Drops the cached picker rows, so a different client rebuilds them.
+    /// </summary>
+    /// <remarks>
+    /// They are built from the loaded client's hue table and fonts, so pointing
+    /// at another installation would otherwise keep showing the previous one's.
+    /// </remarks>
+    private void ForgetPickerEntries()
+    {
+        _hueEntries = null;
+        _fontEntries = null;
+    }
+
+    /// <summary>
+    /// A colour field with a swatch and a picker beside it.
+    /// </summary>
+    /// <remarks>
+    /// The field stays editable, because a colour copied out of a server script
+    /// arrives as a number and the two spellings in the wild — RGB555 and 24-bit
+    /// — both read correctly. The picker writes RGB555.
+    /// </remarks>
+    private Grid BuildColorEditor(Element element, PropertyRow row)
+    {
+        Grid layout = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto") };
+
+        TextBox box = BuildTextEditor(element, row);
+
+        Border swatch = new()
+        {
+            Width = 26,
+            Height = 20,
+            Margin = new Avalonia.Thickness(4, 0, 0, 0),
+            BorderThickness = new Avalonia.Thickness(1),
+            BorderBrush = Brushes.Gray,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            Background = ColorBrush(row.Read(element)),
+        };
+
+        Button pick = new()
+        {
+            Content = "…",
+            Width = 30,
+            Margin = new Avalonia.Thickness(4, 0, 0, 0),
+        };
+
+        pick.Click += async (_, _) =>
+        {
+            int current = row.Read(element) is int value ? value : 0;
+
+            ColorPickerWindow picker = new(current);
+
+            await picker.ShowDialog(this).ConfigureAwait(true);
+
+            if (picker.Result is not { } chosen)
+            {
+                return;
+            }
+
+            box.Text = chosen.ToString(CultureInfo.InvariantCulture);
+            swatch.Background = ColorBrush(chosen);
+
+            ApplyProperty(element, row, chosen);
+            _canvas.InvalidateVisual();
+        };
+
+        box.LostFocus += (_, _) => swatch.Background = ColorBrush(row.Read(element));
+
+        Grid.SetColumn(box, 0);
+        Grid.SetColumn(swatch, 1);
+        Grid.SetColumn(pick, 2);
+        layout.Children.Add(box);
+        layout.Children.Add(swatch);
+        layout.Children.Add(pick);
+
+        return layout;
+    }
+
+    /// <summary>The brush a colour value paints, or none when it is unset.</summary>
+    private static SolidColorBrush? ColorBrush(object? value)
+    {
+        if (value is not int number || Rendering.GumpColor.ToSkColor(number) is not { } colour)
+        {
+            return null;
+        }
+
+        return new SolidColorBrush(Color.FromRgb(colour.Red, colour.Green, colour.Blue));
+    }
+
+    /// <summary>Hue rows, built once per client because there are thousands.</summary>
+    private IReadOnlyList<PickerEntry> HueEntries() =>
+        _hueEntries ??= PickerEntries.Hues(_session.Data);
+
+    /// <summary>Font rows, built once per client.</summary>
+    private IReadOnlyList<PickerEntry> FontEntries() =>
+        _fontEntries ??= PickerEntries.Fonts(_session.Data);
+
+    /// <summary>
+    /// A field that filters a list of previews as you type.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Hues and fonts are both meaningless as numbers — nobody knows what hue
+    /// 1153 looks like — so each row is drawn: a hue as its own colour ramp, a
+    /// font as a line of text set in it. Typing filters by index or by name, so
+    /// "blue" finds the blue hues and "11" narrows to those numbers.
+    /// </para>
+    /// <para>
+    /// The swatch beside the field shows the current value without opening the
+    /// list, which is the state you are in most of the time.
+    /// </para>
+    /// </remarks>
+    private Grid BuildPickerEditor(
+        Element element, PropertyRow row, IReadOnlyList<PickerEntry> entries)
+    {
+        Grid layout = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+
+        object? current = row.Read(element);
+        PickerEntry? selected = entries.FirstOrDefault(e => Equals(e.Value, current));
+
+        bool samples = entries.Any(e => e.Sample is not null);
+
+        ContentControl preview = new()
+        {
+            Width = samples ? FontPreviewWidth : HuePreviewWidth,
+            Margin = new Avalonia.Thickness(4, 0, 0, 0),
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            Content = Swatch(selected, samples ? FontPreviewWidth : PickerSampleWidth),
+        };
+
+        AutoCompleteBox box = new()
+        {
+            ItemsSource = entries,
+            FilterMode = AutoCompleteFilterMode.Custom,
+            ItemFilter = (search, item) => item is PickerEntry entry && entry.Matches(search),
+            MinimumPrefixLength = 0,
+            IsTextCompletionEnabled = false,
+            MaxDropDownHeight = 320,
+            ItemTemplate = PickerTemplate(),
+            Text = selected?.Display ?? Convert.ToString(current, CultureInfo.InvariantCulture),
+        };
+
+        // Two things happen on focus. The field shows "1152 — ice_hue_2" when it
+        // is idle, which is not a search term — typing into it would filter on
+        // that whole label and match nothing — so it is emptied. And the list is
+        // opened explicitly: an AutoCompleteBox drops down when its text changes,
+        // which meant browsing was impossible without first typing something.
+        box.GotFocus += (_, _) =>
+        {
+            if (box.Text?.Length > 0)
+            {
+                box.Text = string.Empty;
+            }
+
+            box.IsDropDownOpen = true;
+        };
+
+        box.SelectionChanged += (_, _) =>
+        {
+            if (box.SelectedItem is not PickerEntry chosen)
+            {
+                return;
+            }
+
+            selected = chosen;
+            preview.Content = Swatch(chosen, samples ? FontPreviewWidth : PickerSampleWidth);
+
+            ApplyProperty(element, row, chosen.Value);
+        };
+
+        // Clicking a row in the list takes focus off the field before the
+        // selection is reported, so doing any of this synchronously would undo
+        // the click: the search term is not a number, so the field would be put
+        // back to the previous value and the choice lost. Posting it lets
+        // SelectionChanged land first, after which there is nothing to correct.
+        box.LostFocus += (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            if (box.IsFocused)
+            {
+                return;
+            }
+
+            // A bare number still works, so an id copied out of a script can be
+            // pasted straight in.
+            if (Typed(entries, box.Text) is { } match)
+            {
+                selected = match;
+                preview.Content = Swatch(match, samples ? FontPreviewWidth : PickerSampleWidth);
+
+                ApplyProperty(element, row, match.Value);
+            }
+            else if (TypedWithoutEntries(row.Read(element), box.Text) is { } raw)
+            {
+                // With no client loaded there are no rows to match against, and
+                // the field would otherwise silently discard what was typed.
+                ApplyProperty(element, row, raw);
+            }
+
+            box.Text = selected?.Display ?? box.Text;
+        });
+
+        Grid.SetColumn(box, 0);
+        Grid.SetColumn(preview, 1);
+        layout.Children.Add(box);
+        layout.Children.Add(preview);
+
+        return layout;
+    }
+
+    /// <summary>The row a typed-in number names, or null.</summary>
+    private static PickerEntry? Typed(IReadOnlyList<PickerEntry> entries, string? text) =>
+        int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index)
+            ? entries.FirstOrDefault(e => e.Index == index)
+            : null;
+
+    /// <summary>
+    /// A typed number applied without a row to match it against.
+    /// </summary>
+    /// <remarks>
+    /// The rows come from the loaded client, so with none configured the hue and
+    /// font lists are empty. Typing an id has to keep working regardless: it is
+    /// how the field behaved before it became a picker, and how a value copied
+    /// out of a server script gets in.
+    /// </remarks>
+    private static object? TypedWithoutEntries(object? current, string? text)
+    {
+        if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index))
+        {
+            return null;
+        }
+
+        return current switch
+        {
+            int => index,
+            FontChoice font => font with { Index = index },
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Draws one row: its preview, then its number and name.
+    /// </summary>
+    /// <remarks>
+    /// Every row is the same fixed width, and the label is trimmed rather than
+    /// allowed to push it wider. The list virtualises, so a row is only measured
+    /// once it scrolls into view — with rows free to size themselves the popup
+    /// grew and shrank as it was scrolled, since hue names range from <c>none</c>
+    /// to <c>Hue (2054→24191)</c>.
+    /// </remarks>
+    private static FuncDataTemplate<PickerEntry> PickerTemplate() =>
+        new((entry, _) =>
+        {
+            if (entry is null)
+            {
+                // A template is also asked to build while a container is being
+                // cleared, with no item.
+                return new Border();
+            }
+
+            Grid row = new()
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,*"),
+                Width = PickerRowWidth,
+                Height = 22,
+            };
+
+            Control swatch = Swatch(entry, PickerSampleWidth);
+
+            swatch.Margin = new Avalonia.Thickness(0, 0, 8, 0);
+
+            TextBlock label = new()
+            {
+                Text = entry.Display,
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            };
+
+            Grid.SetColumn(swatch, 0);
+            Grid.SetColumn(label, 1);
+            row.Children.Add(swatch);
+            row.Children.Add(label);
+
+            return row;
+        });
+
+    /// <summary>A hue's ramp or a font's sample, sized to sit in a row.</summary>
+    private static Control Swatch(PickerEntry? entry, double sampleWidth)
+    {
+        if (entry?.Sample is { } sample)
+        {
+            // Scaled down only when it will not fit, so a face is shown at its
+            // real size wherever there is room for it.
+            Image image = new()
+            {
+                Source = sample,
+                MaxWidth = sampleWidth,
+                MaxHeight = 22,
+                Stretch = Avalonia.Media.Stretch.Uniform,
+                StretchDirection = Avalonia.Media.StretchDirection.DownOnly,
+            };
+
+            RenderOptions.SetBitmapInterpolationMode(image, BitmapInterpolationMode.None);
+
+            return image;
+        }
+
+        Border swatch = new()
+        {
+            Width = 40,
+            Height = 16,
+            BorderThickness = new Avalonia.Thickness(1),
+            BorderBrush = Avalonia.Media.Brushes.Gray,
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+        };
+
+        if (entry?.Ramp is { Count: > 0 } ramp)
+        {
+            LinearGradientBrush brush = new()
+            {
+                StartPoint = new Avalonia.RelativePoint(0, 0, Avalonia.RelativeUnit.Relative),
+                EndPoint = new Avalonia.RelativePoint(1, 0, Avalonia.RelativeUnit.Relative),
+            };
+
+            for (int i = 0; i < ramp.Count; i++)
+            {
+                brush.GradientStops.Add(
+                    new GradientStop(ramp[i], (double)i / (ramp.Count - 1)));
+            }
+
+            swatch.Background = brush;
+        }
+
+        return swatch;
+    }
+
     private CheckBox BuildBooleanEditor(Element element, PropertyRow row)
     {
         CheckBox box = new() { IsChecked = row.Read(element) is true };
@@ -934,15 +1341,26 @@ public sealed partial class MainWindow : Window, IDisposable
         RefreshElementList();
     }
 
+    /// <summary>
+    /// Fills the export menu, one entry per converter.
+    /// </summary>
+    /// <remarks>
+    /// One entry per converter, not per dialect. Six entries used to read as six
+    /// unrelated formats; the dialect is a property of the export, so it is asked
+    /// for in the options dialog instead.
+    /// </remarks>
     private void BuildExportMenu()
     {
         List<MenuItem> items = [];
 
-        foreach (IGumpExporter exporter in _session.Exporters)
+        foreach (IGumpConverter converter in EditorSession.Converters)
         {
-            MenuItem item = new() { Header = exporter.DisplayName };
+            IGumpConverter captured = converter;
+            MenuItem item = new() { Header = converter.DisplayName + "…" };
 
-            item.Click += async (_, _) => await GuardedAsync(() => ExportAsync(exporter)).ConfigureAwait(true);
+            item.Click += async (_, _) =>
+                await GuardedAsync(() => ExportAsync(captured)).ConfigureAwait(true);
+
             items.Add(item);
         }
 
@@ -1024,61 +1442,6 @@ public sealed partial class MainWindow : Window, IDisposable
             : string.Create(CultureInfo.InvariantCulture, $"Moved {moved} elements to page {index}."));
     }
 
-    private void BuildPluginMenu()
-    {
-        List<MenuItem> items = [];
-
-        foreach (MenuCommandDescriptor descriptor in _session.MenuCommands)
-        {
-            MenuItem item = new() { Header = descriptor.Title };
-
-            item.Click += (_, _) => Guarded(descriptor.Execute);
-            items.Add(item);
-        }
-
-        if (items.Count == 0)
-        {
-            items.Add(new MenuItem { Header = "(no plugins loaded)", IsEnabled = false });
-        }
-
-        _pluginsMenu.ItemsSource = items;
-    }
-
-    /// <summary>
-    /// Makes the exporters available.
-    /// </summary>
-    /// <remarks>
-    /// A NativeAOT image cannot load an assembly at runtime, so there the
-    /// shipped exporters are linked in and registered directly. Every other
-    /// build discovers them on disk, which is also how a third-party plugin
-    /// arrives.
-    /// </remarks>
-    private void LoadPlugins()
-    {
-#if STATIC_PLUGINS
-        _session.RegisterBuiltInPlugins(
-            new Plugins.Pol.PolExporterPlugin(),
-            new Plugins.RunUo.RunUoExporterPlugin(),
-            new Plugins.Sphere.SphereExporterPlugin());
-#else
-        LoadExternalPlugins();
-#endif
-    }
-
-#if !STATIC_PLUGINS
-    private void LoadExternalPlugins()
-    {
-        string directory = Path.Combine(AppContext.BaseDirectory, "Plugins");
-
-        IReadOnlyList<DiscoveredPlugin> discovered = _session.LoadPlugins(directory);
-
-        foreach (DiscoveredPlugin failed in discovered.Where(p => !p.IsUsable))
-        {
-            SetStatus($"{failed.Info.Name} could not load: {failed.Error}", isError: true);
-        }
-    }
-#endif
-
     private async Task OpenAsync()
     {
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -1120,6 +1483,38 @@ public sealed partial class MainWindow : Window, IDisposable
         SetStatus("Imported. Save it to store the document in the current format.");
     }
 
+    /// <summary>
+    /// Imports a gump from the layout text a capture tool produced.
+    /// </summary>
+    /// <remarks>
+    /// The dialog starts with the clipboard's contents when they look like a
+    /// layout, which is the case this exists for: someone has just copied a gump
+    /// out of a sniffer and wants to edit it.
+    /// </remarks>
+    private async Task ImportLayoutAsync()
+    {
+        ImportLayoutWindow dialog = new();
+
+        await dialog.ShowDialog(this).ConfigureAwait(true);
+
+        if (dialog.Result is not { } document)
+        {
+            return;
+        }
+
+        _session.AdoptImported(document);
+        RefreshAll();
+
+        int elements = document.Pages.Sum(page => page.Leaves().Count());
+        string summary = string.Create(
+            CultureInfo.InvariantCulture,
+            $"Imported {elements} elements across {document.PageCount} pages.");
+
+        SetStatus(dialog.Warnings.Count == 0
+            ? summary + " Save it to keep the document."
+            : $"{summary} {dialog.Warnings.Count} line(s) were skipped — see the layout for what was lost.");
+    }
+
     private async Task SaveAsync(string? path)
     {
         if (path is null)
@@ -1143,13 +1538,21 @@ public sealed partial class MainWindow : Window, IDisposable
         RefreshAll();
     }
 
-    private async Task ExportAsync(IGumpExporter exporter)
+    /// <summary>
+    /// Picks a file, asks how to export, then writes it.
+    /// </summary>
+    /// <remarks>
+    /// The file comes first because the gump name defaults to its name. Asking
+    /// for the options first would leave nothing to derive that from, and would
+    /// quietly change the default name of every export.
+    /// </remarks>
+    private async Task ExportAsync(IGumpConverter converter)
     {
         IStorageFile? file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
         {
-            Title = $"Export as {exporter.DisplayName}",
-            DefaultExtension = exporter.FileExtension.TrimStart('.'),
-            SuggestedFileName = "gump" + exporter.FileExtension,
+            Title = $"Export as {converter.DisplayName}",
+            DefaultExtension = converter.FileExtension.TrimStart('.'),
+            SuggestedFileName = "gump" + converter.FileExtension,
         }).ConfigureAwait(true);
 
         if (file is null)
@@ -1157,10 +1560,30 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        string script = exporter.Export(_session.Document, new GumpExportOptions
+        AppSettings settings = AppSettings.Load();
+
+        GumpExportOptions defaults = new()
         {
             GumpName = Path.GetFileNameWithoutExtension(file.Name),
-        });
+            Dialect = settings.ExportDialectFor(converter.Id),
+        };
+
+        ExportOptionsWindow dialog = new(
+            $"Export as {converter.DisplayName}", converter.Dialects, defaults);
+
+        await dialog.ShowDialog(this).ConfigureAwait(true);
+
+        if (dialog.Result is not { } options)
+        {
+            return;
+        }
+
+        // Remembered per converter, so choosing the layout-string form once does
+        // not make it the default for every other target too.
+        settings.SetExportDialect(converter.Id, options.Dialect);
+        settings.Save();
+
+        string script = converter.Export(_session.Document, options);
 
         await File.WriteAllTextAsync(file.Path.LocalPath, script).ConfigureAwait(true);
 
@@ -1174,6 +1597,8 @@ public sealed partial class MainWindow : Window, IDisposable
 
         if (remembered is not null && _session.OpenClient(remembered).Count == 0)
         {
+            ForgetPickerEntries();
+
             RefreshAll();
 
             return;
@@ -1203,6 +1628,8 @@ public sealed partial class MainWindow : Window, IDisposable
 
         string path = folders[0].Path.LocalPath;
         IReadOnlyList<string> missing = _session.OpenClient(path);
+
+        ForgetPickerEntries();
 
         if (missing.Count > 0)
         {

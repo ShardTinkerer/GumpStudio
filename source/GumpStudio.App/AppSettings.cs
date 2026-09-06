@@ -42,6 +42,36 @@ public sealed class AppSettings
     /// </remarks>
     public int ArtBrowserTileSize { get; set; } = 144;
 
+    /// <summary>
+    /// The dialect last chosen for each converter, keyed by converter id.
+    /// </summary>
+    /// <remarks>
+    /// Per converter rather than one global setting: choosing POL's
+    /// layout-string form says nothing about whether Sphere scripts should be
+    /// 0.56 or 0.99.
+    /// </remarks>
+    public Dictionary<string, string> ExportDialects { get; init; } = [];
+
+    /// <summary>The remembered dialect for a converter, or null for its default.</summary>
+    public string? ExportDialectFor(string converterId) =>
+        ExportDialects.TryGetValue(converterId, out string? dialect) ? dialect : null;
+
+    /// <summary>Remembers the dialect chosen for a converter.</summary>
+    public void SetExportDialect(string converterId, string? dialect)
+    {
+        if (dialect is null)
+        {
+            ExportDialects.Remove(converterId);
+
+            return;
+        }
+
+        ExportDialects[converterId] = dialect;
+    }
+
+    /// <summary>Writes these settings to disk.</summary>
+    public void Save() => Save(this);
+
     /// <summary>Where the settings file lives.</summary>
     public static string FilePath { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

@@ -13,11 +13,30 @@ namespace GumpStudio.Rendering.Tests;
 /// <summary>Adapts <see cref="FakeArtSource"/> to the renderer's contract.</summary>
 internal sealed class TestArtSource(FakeArtSource art) : IGumpArtSource
 {
+    /// <summary>Cliloc strings this source can resolve, by id.</summary>
+    public Dictionary<int, string> Clilocs { get; } = [];
+
+    /// <summary>Every string the renderer asked to draw, in order.</summary>
+    public List<string> TextRequests { get; } = [];
+
+    /// <summary>The font each of those was asked for, in the same order.</summary>
+    public List<(GumpFontFamily Family, int Index)> FontRequests { get; } = [];
+
     public SKImage? GetGump(int gumpId, int hue = 0, bool partialHue = false) => art.Lookup("gump", gumpId);
 
     public SKImage? GetItem(int itemId, int hue = 0, bool partialHue = false) => art.Lookup("item", itemId);
 
-    public SKImage? GetText(int fontIndex, string text, int hue = 0) => art.MakeText(text);
+    public SKImage? GetText(
+        int fontIndex, string text, int hue = 0, GumpFontFamily family = GumpFontFamily.Unicode)
+    {
+        TextRequests.Add(text);
+        FontRequests.Add((family, fontIndex));
+
+        return art.MakeText(text);
+    }
+
+    public string? GetCliloc(int clilocId) =>
+        Clilocs.TryGetValue(clilocId, out string? text) ? text : null;
 
     public bool TryGetGumpSize(int gumpId, out int width, out int height)
     {

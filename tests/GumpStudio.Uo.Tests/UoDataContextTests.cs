@@ -1,5 +1,6 @@
 using GumpStudio.TestSupport;
 using GumpStudio.Uo;
+using GumpStudio.Uo.Graphics;
 using GumpStudio.Uo.Primitives;
 
 using Xunit;
@@ -120,6 +121,25 @@ public class UoDataContextTests
         }
 
         Assert.True(decoded >= 25, $"Only decoded {decoded} static tiles.");
+    }
+
+    /// <summary>
+    /// The value a hue reports is the one that looks it back up.
+    /// </summary>
+    /// <remarks>
+    /// Needs no client, because the trap is arithmetic rather than data: a hue
+    /// carries a zero-based <c>Index</c> and a one-based <c>ScriptValue</c>, and
+    /// picking the wrong one is invisible at a glance — adjacent hues look alike,
+    /// so the only symptom is a colour that is subtly not the one selected.
+    /// </remarks>
+    [Fact]
+    public void AHuesScriptValueRoundTripsThroughTheTable()
+    {
+        Hue first = HueTable.Empty.GetByIndex(0);
+
+        Assert.Equal(0, first.Index);
+        Assert.Equal(1, first.ScriptValue);
+        Assert.Same(first, HueTable.Empty.Get(first.ScriptValue));
     }
 
     [Theory(SkipTestWithoutData = true)]

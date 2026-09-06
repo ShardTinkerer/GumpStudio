@@ -4,15 +4,9 @@
     <Project Path="source/GumpStudio.Uo/GumpStudio.Uo.csproj" />
     <Project Path="source/GumpStudio.Core/GumpStudio.Core.csproj" />
     <Project Path="source/GumpStudio.Rendering/GumpStudio.Rendering.csproj" />
-    <Project Path="source/GumpStudio.Plugins.Abstractions/GumpStudio.Plugins.Abstractions.csproj" />
+    <Project Path="source/GumpStudio.Converters/GumpStudio.Converters.csproj" />
     <Project Path="source/GumpStudio.App/GumpStudio.App.csproj" />
     <Project Path="source/GumpStudio.Cli/GumpStudio.Cli.csproj" />
-  </Folder>
-
-  <Folder Name="/source/plugins/">
-    <Project Path="source/GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj" />
-    <Project Path="source/GumpStudio.Plugins.RunUo/GumpStudio.Plugins.RunUo.csproj" />
-    <Project Path="source/GumpStudio.Plugins.Sphere/GumpStudio.Plugins.Sphere.csproj" />
   </Folder>
 
   <Folder Name="/tests/">
@@ -20,9 +14,7 @@
     <Project Path="tests/GumpStudio.Uo.Tests/GumpStudio.Uo.Tests.csproj" />
     <Project Path="tests/GumpStudio.Core.Tests/GumpStudio.Core.Tests.csproj" />
     <Project Path="tests/GumpStudio.Rendering.Tests/GumpStudio.Rendering.Tests.csproj" />
-    <Project Path="tests/GumpStudio.Plugins.Pol.Tests/GumpStudio.Plugins.Pol.Tests.csproj" />
-    <Project Path="tests/GumpStudio.Plugins.RunUo.Tests/GumpStudio.Plugins.RunUo.Tests.csproj" />
-    <Project Path="tests/GumpStudio.Plugins.Sphere.Tests/GumpStudio.Plugins.Sphere.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Converters.Tests/GumpStudio.Converters.Tests.csproj" />
   </Folder>
 
   <Folder Name="/solution items/">

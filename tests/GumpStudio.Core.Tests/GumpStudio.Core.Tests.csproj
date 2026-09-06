@@ -18,4 +18,9 @@
     <ProjectReference Include="../GumpStudio.TestSupport/GumpStudio.TestSupport.csproj" />
   </ItemGroup>
 
+  <!-- A real gump captured off the wire, used to test the layout importer. -->
+  <ItemGroup>
+    <Content Include="Captures/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

@@ -3,7 +3,7 @@ using GumpStudio.Core.Document;
 using GumpStudio.Core.Editing;
 using GumpStudio.Core.Export;
 using GumpStudio.Core.Serialization;
-using GumpStudio.Plugins;
+using GumpStudio.Converters;
 using GumpStudio.Rendering;
 using GumpStudio.Uo;
 
@@ -11,17 +11,14 @@ namespace GumpStudio.App;
 
 /// <summary>
 /// Everything the editor is currently working on: the open document, the undo
-/// history, the client data, the loaded plugins and the canvas state.
+/// history, the client data and the canvas state.
 /// </summary>
 /// <remarks>
 /// The counterpart of the old <c>DesignerForm</c>'s field soup, but with no UI
 /// in it — the window binds to this rather than owning the state itself.
 /// </remarks>
-public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposable
+public sealed class EditorSession : IDisposable
 {
-    private readonly List<IGumpExporter> _exporters = [];
-    private readonly List<MenuCommandDescriptor> _menuCommands = [];
-    private readonly PluginLoader _loader = new();
 
     private UoDataContext? _data;
     private UoArtSource? _art;
@@ -49,11 +46,8 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
     /// <summary>The loaded client, or null.</summary>
     public UoDataContext? Data => _data;
 
-    public IReadOnlyList<IGumpExporter> Exporters => _exporters;
-
-    public IReadOnlyList<MenuCommandDescriptor> MenuCommands => _menuCommands;
-
-    public IGumpDocumentSession Session => this;
+    /// <summary>The converters the export menu offers.</summary>
+    public static IReadOnlyList<IGumpConverter> Converters => GumpConverters.All;
 
     public int ActivePageIndex
     {
@@ -80,9 +74,6 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
 
     public event EventHandler? PageChanged;
 
-    /// <summary>Raised when a plugin or the app wants to tell the user something.</summary>
-    public event EventHandler<PluginNotification>? Notified;
-
     /// <summary>Opens a client installation, replacing any already loaded.</summary>
     /// <returns>The files that were missing, or empty on success.</returns>
     public IReadOnlyList<string> OpenClient(string clientPath)
@@ -107,47 +98,6 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
         return [];
     }
 
-    /// <summary>Discovers and initialises plugins from a directory.</summary>
-    /// <remarks>
-    /// Carries the loader's own restriction: a plugin is an assembly the build
-    /// never saw, so a trimmed or ahead-of-time image cannot load it. Those
-    /// builds call <see cref="RegisterBuiltInPlugins"/> instead.
-    /// </remarks>
-    [System.Diagnostics.CodeAnalysis.RequiresUnreferencedCode(
-        "Plugins are discovered from disk by reflection. Use RegisterBuiltInPlugins instead.")]
-    [System.Diagnostics.CodeAnalysis.RequiresDynamicCode(
-        "Plugins are discovered from disk by reflection. Use RegisterBuiltInPlugins instead.")]
-    public IReadOnlyList<DiscoveredPlugin> LoadPlugins(string directory)
-    {
-        IReadOnlyList<DiscoveredPlugin> discovered = _loader.Discover(directory);
-
-        foreach (DiscoveredPlugin plugin in discovered.Where(p => p.IsUsable))
-        {
-            try
-            {
-                plugin.Instance!.Initialize(this);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
-            {
-                // One misbehaving plugin must not take the editor down with it.
-                Notify(PluginNotificationLevel.Error, $"{plugin.Info.Name} failed to start: {ex.Message}");
-            }
-        }
-
-        return discovered;
-    }
-
-    /// <summary>Registers the exporters that ship in the box.</summary>
-    public void RegisterBuiltInPlugins(params IGumpStudioPlugin[] plugins)
-    {
-        ArgumentNullException.ThrowIfNull(plugins);
-
-        foreach (IGumpStudioPlugin plugin in plugins)
-        {
-            plugin.Initialize(this);
-        }
-    }
-
     public void NewDocument() => Replace(new GumpDocument(), null);
 
     public void Open(string path)
@@ -161,25 +111,23 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
         Replace(Core.Legacy.LegacyGumpImporter.ImportDocument(path), null);
     }
 
+    /// <summary>
+    /// Adopts a document imported from captured layout text.
+    /// </summary>
+    /// <remarks>
+    /// It has no path, like a legacy import: the capture is not a place the
+    /// document can be saved back to.
+    /// </remarks>
+    public void AdoptImported(GumpDocument document) => Replace(document, null);
+
     public void Save(string path)
     {
         GumpXmlSerializer.Save(_document, path);
         DocumentPath = path;
     }
 
+    /// <summary>Applies an undoable change to the document.</summary>
     public void Apply(IUndoableCommand command) => History.Push(command);
-
-    public void RegisterExporter(IGumpExporter exporter)
-    {
-        ArgumentNullException.ThrowIfNull(exporter);
-
-        _exporters.Add(exporter);
-    }
-
-    public void RegisterMenuCommand(MenuCommandDescriptor descriptor) => _menuCommands.Add(descriptor);
-
-    public void Notify(PluginNotificationLevel level, string message) =>
-        Notified?.Invoke(this, new PluginNotification(level, message));
 
     /// <summary>
     /// Measures art-derived element sizes on every page the canvas draws.
@@ -215,11 +163,7 @@ public sealed class EditorSession : IPluginHost, IGumpDocumentSession, IDisposab
 
     public void Dispose()
     {
-        _loader.Dispose();
         _art?.Dispose();
         _data?.Dispose();
     }
 }
-
-/// <summary>A message destined for the user.</summary>
-public readonly record struct PluginNotification(PluginNotificationLevel Level, string Message);

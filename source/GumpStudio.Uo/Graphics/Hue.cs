@@ -38,6 +38,18 @@ public sealed class Hue
     /// <summary>Zero-based hue index. The wire representation is this plus one.</summary>
     public int Index { get; }
 
+    /// <summary>
+    /// The value an element or a gump script stores for this hue.
+    /// </summary>
+    /// <remarks>
+    /// One more than <see cref="Index"/>, and what <see cref="HueTable.Get"/>
+    /// takes. Having both available as bare integers is a standing trap: offering
+    /// <see cref="Index"/> where this belongs labels a hue with the wrong number
+    /// and shows its neighbour's colours, which is subtle enough to survive a
+    /// glance because adjacent hues usually look alike.
+    /// </remarks>
+    public int ScriptValue => Index + 1;
+
     public string Name { get; }
 
     public ushort TableStart { get; }

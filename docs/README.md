@@ -32,8 +32,8 @@ dotnet publish source/GumpStudio.App -c Release -r linux-x64 --self-contained
 dotnet publish source/GumpStudio.App -c Release -r osx-arm64 --self-contained
 ```
 
-Plugins are copied into a `Plugins` folder beside the executable by a publish
-target; the host discovers them there at startup.
+The four export converters are compiled in, so a published build has everything
+it needs beside the executable and the NativeAOT image behaves identically.
 
 ## Repository layout
 

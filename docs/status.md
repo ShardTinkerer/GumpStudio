@@ -1,6 +1,6 @@
 # Status and roadmap
 
-Last updated after the snap-to-grid work. Phases 0, 1, 2, 3, 4 and 5 are
+Last updated after the preview work. Phases 0, 1, 2, 3, 4, 5, 7, 8 and 9 are
 complete; Phase 6 is partly done.
 
 ## Why the rewrite exists
@@ -32,8 +32,8 @@ serve as the behaviour reference where the existing port looks wrong.
 | Save format | XML, versioned, decoupled from CLR type names |
 | Legacy `.gump` | Read-only importer via `System.Formats.Nrbf`; `BinaryFormatter` is never enabled |
 | Client data | `.mul` **and** `.uop` |
-| Plugins | External-DLL model kept, but the contract is UI-agnostic |
-| Exporters | POL, RunUO and Sphere, in two dialects each. The RunUO *importer* and Wolfpack stay dropped |
+| Plugins | **Removed.** The three shipped exporters were the only thing it carried |
+| Exporters | One layout IR, four converters: raw client layout, POL, RunUO and Sphere. The RunUO *importer* and Wolfpack stay dropped |
 
 ## Phase 0 — Foundation ✅
 
@@ -423,9 +423,12 @@ drawing order, no context menu, and Ctrl+G did nothing.
 **Shortcuts never worked at all.** `InputGesture` on an Avalonia `MenuItem` only
 *draws* the shortcut beside the item — it does not bind the key. Every gesture in
 the menu bar was decorative: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Z, Ctrl+Y, Ctrl+A and
-Ctrl+G all did nothing. They are real `KeyBindings` on the window now, so a
-control that has already handled the key — a text box swallowing Ctrl+A or Delete
-while the caret is in it — still wins.
+Ctrl+G all did nothing. They are real `KeyBindings` on the window now.
+
+> **Corrected later.** This section originally claimed that a control which had
+> already handled the key still won, so a text box would swallow Ctrl+A or Delete
+> while the caret was in it. That is not true of Avalonia 12 — see
+> [Phase 9](#phase-9--a-preview-worth-trusting-).
 
 **Drawing order had no UI.** It is the whole of layering in a gump: the last
 child of a group draws in front. A background added after an image covered it
@@ -504,20 +507,25 @@ elements before `page 1` already expresses the same thing.
 
 **Not built.** Still missing relative to the original:
 
-- A **hue picker**. Hues are still typed as numbers, and a hue is as opaque as a
-  gump id. The same browser pattern would suit it — swatches instead of
-  thumbnails — and `HueTable` already exposes the colours.
-- A **cliloc browser** for the HTML element's localised id.
-- A plugin manager UI for enabling and ordering plugins; discovery currently
-  loads everything it finds.
+- ~~A **hue picker**.~~ Built in [Phase 9](#phase-9--a-preview-worth-trusting-):
+  a searchable dropdown of colour ramps on every hue row.
+- A **cliloc browser** for the HTML element's localised id. The preview resolves
+  clilocs now, so what is left is finding one by its text.
 - Drag-to-reorder in the element list. The four ordering commands cover the same
   ground from the keyboard and the context menu.
 
-## Phase 5 — Plugins and the POL exporter ✅
+## Phase 5 — The POL exporter ✅
+
+> **Superseded in part by [Phase 7](#phase-7--one-layout-ir-four-converters-no-plugins-).**
+> The plugin contract described here was removed: it existed almost entirely to
+> carry the exporters, which are ordinary referenced converters now. The POL
+> output itself, and every correction listed below, survives unchanged — the
+> goldens prove it.
 
 Done ahead of Phase 4, because the plugin contract is UI-agnostic by design and
 therefore does not need the shell. Doing it first means the shell can wire up a
-real exporter rather than a stub. 43 tests in `GumpStudio.Plugins.Pol.Tests`.
+real exporter rather than a stub. 43 POL tests, now in
+`GumpStudio.Converters.Tests`.
 
 - `IGumpStudioPlugin` / `IPluginHost` carry no UI type at all. Menu
   contributions are declarative descriptors the shell renders, so a plugin never
@@ -609,6 +617,387 @@ implemented until something needs them.
 - ⬜ No release tagged.
 
 ---
+
+
+## Phase 7 — One layout IR, four converters, no plugins ✅
+
+Each exporter used to walk the document itself. That meant three page loops,
+three copies of the radio-group tracker, three text-slot allocators, and three
+element `switch`es with a `default` arm — the failure mode `IElementVisitor` was
+introduced to prevent, and which no exporter actually used.
+
+The client's layout grammar was hand-written **four** times. `pol-layout` and
+`sphere-056` emit it, and the other two dialects build it as well, for the notes
+they leave beside commands they cannot express: `PolScriptBuilder` carried eight
+private `LayoutXxx` helpers whose only purpose was to feed `Unsupported()`.
+
+Now `GumpDocument` → `GumpLayoutBuilder` → `GumpLayout` → one of four converters.
+**The IR carries meaning; a converter owns syntax.** Absolute coordinates, page
+boundaries, radio-group scoping, text-slot allocation and tooltip ordering are
+decided once. Escaping, flag spelling and identifier rules stay per target, which
+is right: the same flag is `NOCLOSE` in Sphere 0.56, `NoClose` in 0.99 and in POL.
+
+A dimension-by-dimension diff of the two raw dialects found the element commands
+**byte-identical** — including `xmfhtmltok`, whose parameter order genuinely
+differs from the colour form. Only the surrounding policy differed, and that is
+now two fields on `LayoutStringOptions`: how `group` is spelled, and whether
+`endgroup` is emitted at all.
+
+### How it was kept honest
+
+The whole refactor was done against **byte-exact goldens**, generated before it
+started from a fixture that exercises every element type, both button kinds,
+every HTML form, nested groups, several pages and a radio group repeated across a
+page boundary. Every builder already took an injectable timestamp, so the output
+is reproducible and a diff means something. The goldens did not move once.
+
+The ~1,800 lines of existing export tests also passed **unmodified** through the
+conversion, because each builder kept its `Build(document, …)` entry point and
+only its internals changed. They are in `GumpStudio.Converters.Tests` now, along
+with a test that asserts the shared writer reproduces both raw dialects exactly.
+
+### Three things that would have broken it quietly
+
+- **Value equality on commands.** RunUO joins a pre-pass back to individual
+  commands to build its `Buttons` enum. Commands are records, so two reply
+  buttons with the same name, response id and position compare equal — the map
+  would collapse and the generated switch would name a member nothing emits. The
+  join is keyed on a stable `Ordinal`.
+- **Baking text indices into commands.** The gump package hard-codes index `0` in
+  its notes, because that output has no data array for a real index to point
+  into. Text slots are resolved by the writer, not by the builder.
+- **Turning gump properties into commands.** RunUO needs typed values, emits the
+  movable/closable/disposable flags unconditionally where the others emit tokens
+  only when false, and emits nothing at all for `toggleupperwordcase`.
+  `GumpProperties` stays structured on the layout.
+
+### The plugin system is gone
+
+It existed almost entirely to carry three exporters, and its only other extension
+point — `RegisterMenuCommand` — was never called. It cost a project, a
+collectible `AssemblyLoadContext`, `RequiresUnreferencedCode` and
+`RequiresDynamicCode` annotations that propagated to every caller, a second
+registration path behind `#if STATIC_PLUGINS` because a NativeAOT image cannot
+load an assembly at all, ~60 lines of MSBuild to deploy the assemblies, and three
+near-identical loader test files. A new exporter had to be added in three places
+— the plugin's `Initialize`, the `STATIC_PLUGINS` list and the CLI's dictionary —
+or it silently went missing from one build.
+
+Converters are ordinary referenced code now, so **an AOT publish and an ordinary
+build run the same path**, and adding one means adding it to a single list. The
+AOT image still builds clean at 23.4 MB with no trim or AOT warnings, and a
+self-contained publish no longer produces an empty `Plugins` folder.
+
+### Four formats, and a dialect you can choose
+
+The export menu had six entries, which read as six unrelated formats rather than
+four servers. It has four now — one per converter — and the dialect is asked for
+in an **export options dialog**, which also closes a gap listed below: `Namespace`
+and `IncludeComments` previously always took their defaults in the editor and were
+reachable only from the CLI and the API. The dialog opens *after* the file picker,
+because the gump name defaults to the chosen file name.
+
+The new **`layout`** format is the fourth converter: the client's own command
+list and the data array it indexes, belonging to no particular server. It is what
+shard authors already paste between tools, and it is the quickest way to check a
+suspected export defect without reading generated C# or POL.
+
+The CLI takes `--format <converter> [--dialect <id>]`. The six ids earlier
+releases used are a published surface, so `pol-layout`, `runuo-numeric`,
+`sphere-056` and `sphere-099` still work and select the same converter and
+dialect as before.
+
+### Two latent defects, deliberately left alone
+
+Both would have been silently "fixed" by sharing the builder, so both are
+recorded rather than changed:
+
+- **RunUO emits one `TextRelay` local per text entry, undeduplicated**, while its
+  button `case` labels *are* deduplicated with a comment explaining why. Two text
+  entries sharing an `EntryId` produce a duplicate C# local, which does not
+  compile.
+- **Sphere emits one `ON=` block per reply button**, so two buttons sharing a
+  `Param` produce two handlers for the same id.
+
+Deduplicating both is almost certainly right, but it moves the goldens, so it
+belongs in its own commit with its own test.
+
+
+## Phase 8 — Importing a gump captured off the wire ✅
+
+Shard authors capture gumps with a packet sniffer, which dumps the layout string
+the server sent. That is the same grammar the `layout` converter writes, so
+importing one is the export pipeline run backwards over the same IR:
+
+```
+layout text ──► LayoutStringParser ──► GumpLayout ──► GumpLayoutReader ──► GumpDocument
+```
+
+Reached from **File ▸ Import gump layout…**, which opens with the clipboard's
+contents already in the box when they look like a layout, and from
+`gumpstudio import`, which reads a file or standard input.
+
+The dialog keeps the text editable and previews what it would produce — element
+and page counts, and the first thing it could not use — before anything is
+committed. Captures are routinely truncated mid-command, and being able to delete
+the broken line beats being told the paste is unusable.
+
+### What the real capture taught it
+
+Written against a genuine dump of the character-profile gump, checked in as
+`tests/GumpStudio.Core.Tests/Captures/wire-capture.txt`. It is the only evidence
+available of what these files actually look like, and almost every leniency in
+the parser is there because of something in it:
+
+- **Page 0 is opened five separate times**, and the numbers used skip from 2 to
+  9. Pages are merged by number rather than appended per command, and the gaps
+  are filled with empty pages so page buttons keep pointing where the server
+  meant. A ceiling of 255 stops a malformed capture asking for millions.
+- **A doubled space after a command name.** Runs of whitespace are one separator.
+- **`@0@10` with no closing delimiter**, alongside `@#1027027`. A trailing `@` is
+  optional.
+- **A text block holding one empty entry**, indexed by nothing. A gump built
+  entirely from clilocs has no strings of its own, so a missing or truncated text
+  block is the ordinary case, not corruption.
+
+The braces, the `[layout]` and `[text]` markers and the header comment are all
+optional, and several commands may share a line — captures are not written by one
+tool. Nothing throws: an unknown command or an out-of-range text reference is
+reported and skipped.
+
+The header a capture tool writes — `// Gump 0x1CC at (50, 50) — serial 043CAD798`
+— gives the gump id and where it opens, both of which are kept. The serial
+belongs to the session that captured it and is dropped.
+
+### Proof it is the inverse of exporting
+
+A round-trip test writes the exhaustive sample document as layout text, reads it
+back, and writes it again: the two must be identical. A second test re-exports
+the imported real capture and compares every element command against the ones it
+came from.
+
+End to end, the capture imports as 140 elements across 11 pages, renders against
+a real client, and exports as a compiling RunUO gump.
+
+### Two things that cannot survive, by design
+
+- **Groups.** The client has no notion of one, so an imported document is flat.
+  This costs nothing: a group only affects its children's absolute positions, and
+  the layout has already resolved those.
+- **Element names and comments.** They never reach the wire, so a capture has
+  none to recover.
+
+### A gap this made visible
+
+The renderer drew a localised text area as its bare cliloc id, which a captured
+gump made glaring. Fixed in
+[Phase 9](#phase-9--a-preview-worth-trusting-).
+
+
+## Phase 9 — A preview worth trusting ✅
+
+Reported from using the editor on an imported gump: shortcuts leaking into text
+boxes, cliloc ids instead of text, one font for everything, hues and fonts as bare
+numbers, and HTML colours ignored.
+
+### A window shortcut fires even when a text box has handled the key
+
+Copying the cliloc id out of the property panel put the *element's XML* on the
+clipboard instead of the number. The cause is worse than the symptom: **an
+Avalonia 12 window `KeyBinding` runs even when the focused control has already
+marked the key handled.**
+
+Verified rather than assumed, with a headless probe — a `Window` with one
+`KeyBinding` and a focused `TextBox`:
+
+| Gesture | TextBox marked handled | Window command still ran |
+|---|---|---|
+| Ctrl+C, Ctrl+X, Ctrl+V | yes | **yes** |
+| Ctrl+A | yes | **yes** |
+| Delete | yes | **yes** |
+| Ctrl+Z | yes | **yes** |
+
+So every one of them leaked, and **Delete was the dangerous one**: pressing it
+while editing a property deleted the selected element. Only the clipboard case
+was reported, because it is the only one that announces itself.
+
+The shortcuts that a text box owns — Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+A, Delete,
+Ctrl+Z, Ctrl+Y — now check the focused element and do nothing when it is a
+`TextBox`. The rest (Ctrl+N, Ctrl+O, Ctrl+S, the grouping and z-order ones) mean
+the same thing wherever the keyboard is and are left alone. There is nothing to
+opt into that makes bubbling stop, so checking focus is the fix, not a workaround.
+
+This also corrects a claim in Phase 4, which stated the opposite.
+
+### A localised area showed its cliloc id
+
+`#1044017` rather than `MARK ITEM`. Tolerable while gumps were authored by hand
+and the author had just typed the id; useless for a gump imported from a wire
+capture, which is often built from nothing but clilocs — the character-profile
+capture previews as a wall of numbers.
+
+`IGumpArtSource` gained `GetCliloc`, defaulted to null so a source that only
+supplies art keeps compiling, and the renderer resolves the id. Falling back to
+`#id` is still right when no client is loaded or the id is absent.
+
+Substitution came with it, because `xmfhtmltok` is common in captures:
+
+- `~1_NAME~` placeholders are filled from the argument list, which the client
+  numbers from one and separates with `@`.
+- **An argument of the form `#1234` is itself a cliloc id.** That is how one
+  localised string nests inside another; the captured bulk-order gump uses it to
+  name the item, and without it the preview reads `~1_val~`.
+- A placeholder with no argument is left as it stands rather than blanked, so a
+  missing value stays visible.
+
+The bulk-order capture now previews as real English: "A bulk order", "Amount to
+make:", "hammer pick", "Do you want to accept this order?".
+
+### Choosing the preview font
+
+Reported after the cliloc work landed: every text element previewed in the same
+ornate face, with no way to change it. It was Unicode font 0 — blackletter, hard
+to read at gump sizes, and not what the client uses for body text. Only
+`LabelElement` honoured a font at all; localised areas and text entries had it
+hard-coded.
+
+`IFontedElement` now carries a family and an index, implemented by
+`LabelElement`, `HtmlElement` and `TextEntryElement`, editable in the property
+panel and round-tripped through the save format.
+
+**Both families are reachable.** `AsciiFonts` had been loaded since Phase 1 and
+never drawn with — the gap this page recorded against the quinted build. A
+current client ships 13 Unicode faces and 10 ASCII ones; the Unicode set is worth
+knowing, because six of the thirteen are runic and unusable for a menu:
+
+| Unicode | 0 ornate blackletter · 1 plain · 2 tiny · 3 bold sans · 4 large sans · 5 small sans · 6 medium sans · 7-12 runic |
+|---|---|
+| **ASCII** | the ten `fonts.mul` faces, which are the older UO look |
+
+The default moved from 0 to **1**, the plain face. Nothing an exporter writes
+changes — the protocol's text commands carry no font, which the untouched
+exporter goldens confirm — so this is purely about the preview being readable.
+Labels always stored an explicit `font` attribute, so no saved document changes;
+HTML areas and text entries never did, and pick up the new default.
+
+### Picking a hue or a font by looking at it
+
+Reported once the font became settable: both are still numbers, and nobody knows
+what hue 1153 or font 4 looks like.
+
+The **Hue** and **Font** rows are searchable dropdowns now. Each row draws what it
+means — a hue as its own colour ramp, a font as a line of text set in it — and
+typing filters by index or by name, so `blue` finds `1155 — dark blue`,
+`1162 — Purpleblue` and the rest, and `ascii` narrows the fonts to that family. A
+swatch beside the field shows the current value without opening the list, which
+is the state it is in most of the time.
+
+Three defects in the pickers themselves, all reported from use and all confirmed
+by driving the real window:
+
+- **The hue picker was off by one.** `Hue.Index` is the position in `hues.mul`,
+  but an element and a gump script store the one-based value that
+  `HueTable.Get` turns back into that position — the picker offered the raw
+  index. So every row was labelled with the wrong number, showed its
+  neighbour's colours and name, and wrote a value one lower than the one
+  displayed. Measured before and after on hue 1152: the swatch ran
+  `140,140,140 → 228,228,228`, a pure grey, where the element on the canvas was
+  blue; it now runs `96,249,252 → 18,46,167`, and the name reads `ice_hue`
+  rather than `ice_hue_2`. Adjacent hues look alike, which is why this survived a
+  glance. `Hue.ScriptValue` names the conversion now so the two cannot be
+  confused at a call site, and a client-free test pins the round trip.
+- **Clicking a row did not select it**; only typing a value worked. Clicking
+  takes focus off the field *before* the selection is reported, so the
+  lost-focus handler ran first, found the search term was not a number, and put
+  the previous value back — cancelling the click. It is posted now, so the
+  selection lands first and there is nothing left to correct.
+- **The list only opened once something was typed.** An `AutoCompleteBox` drops
+  down when its text *changes*, so clicking a field showed nothing — which is the
+  opposite of what a picker is for, and worst for fonts, where the number tells
+  you nothing at all. It is opened explicitly on focus now.
+
+Three more details that only showed up the same way:
+
+- **The field's own label is not a search term.** It reads `1152 — ice_hue` when
+  idle, so typing into it filtered on that whole string and matched nothing. It
+  empties on focus instead.
+- **The popup grew and shrank while it was scrolled.** The list virtualises, so a
+  row is measured only once it comes into view, and hue names run from `none` to
+  `Hue (2054→24191)`. Every row is a fixed width now, with the label trimmed
+  rather than allowed to push it wider.
+- **Typing a bare number still works**, which matters when there is no client
+  loaded and so no rows to match against. That is how the field behaved before it
+  became a picker, and how a value copied out of a server script gets in.
+
+The preview beside the field is sized per kind: a hue needs only a swatch, but a
+font sample is a line of text and is illegible in the same space.
+
+The font row also replaced the separate family and index rows it had briefly: one
+list of every face in both families reads better than two controls that have to
+agree.
+
+### An HTML colour is not a hue
+
+`xmfhtmlgumpcolor` and `xmfhtmltok` carry a colour, and the renderer ignored it —
+every localised area drew white.
+
+The client mixes two colour encodings, and the decompiled client notes call
+confusing them "the most common source of wrong assumptions": a **hue index**
+looks up `hues.mul`, an **RGB555** value never touches it. This slot is the second
+kind. Servers write it both ways, and one captured gump uses both in the same
+definition — `32767` is `0x7FFF`, RGB555 white, and `16777215` is `0xFFFFFF`,
+24-bit white.
+
+So a value that fits in fifteen bits is read as RGB555 and anything larger as
+24-bit RGB. That resolves both spellings of white, and keeps an ordinary
+`#RRGGBB` red from collapsing to near-black, which masking into RGB555 would do.
+Five-bit channels expand so that full saturation reaches 255 rather than 248 —
+otherwise white comes out faintly grey next to real white.
+
+The reference documents the packing but not which form the gump path accepts, and
+its notes describe a different build from the installed ones, so this is a reading
+of what servers actually send rather than a transcription.
+
+### Picking a text colour
+
+The colour slot had no editor beyond a raw integer. **Gump ▸ the HTML element's
+Color row** now carries a swatch and a picker.
+
+Its channels run **0 to 31, not 0 to 255**, because that is the client's real
+resolution — the slot is RGB555, so a picker offering eight-bit channels would
+promise sixteen million colours where there are 32,768 and make two nearby picks
+identical. There are presets for the dozen colours worth reaching for, and the
+dialog states the value it will write.
+
+It writes the **RGB555 spelling**. The reference documents the packing but never
+says which form the gump path accepts, so the reading comes from what servers
+send: the captured profile gump uses `32767` and `16777215` side by side for
+labels that are plainly both white, and `0x7FFF` only means white if the client
+masks to fifteen bits — under a 24-bit reading it would be a light blue that no
+author would put beside white text. Reading still accepts either spelling, and
+the field stays editable so a value copied out of a script goes straight in.
+
+### Ctrl+C in a property field copied nothing
+
+A follow-on from the shortcut fix, and a sharper lesson than the original bug.
+Yielding was implemented as an early return *inside* the command — but **a
+`KeyBinding` marks the key handled whenever it executes**, so a command that ran
+and did nothing still swallowed the keystroke. The window stopped copying the
+element, and the text box never got the key either, so Ctrl+C did nothing at all.
+
+Yielding is `CanExecute` now: the binding declines to run, the key is left
+unhandled, and it reaches the text box. Verified by injecting real keystrokes and
+reading the clipboard — `15` from the field, and the element XML when the canvas
+has focus.
+
+### Enhanced Client commands
+
+The same capture carries four `kr_xmfhtmlgump` commands — Enhanced-Client-only,
+with a cliloc of -1 and no geometry, ignored by the classic client. They are
+named as such rather than reported as unknown, because nothing is wrong with the
+capture. Repeated problems also collapse to one warning with a count: a capture
+can carry dozens of the same line, and forty near-identical warnings bury the one
+that matters.
 
 ## Defect inventory
 
@@ -723,17 +1112,13 @@ parser, the POL command reference and RunUO, which agree with each other:
 ## The RunUO and Sphere exporters
 
 Both were dropped from the original plan and put back at the user's request.
-They are ported now, as `GumpStudio.Plugins.RunUo` and
-`GumpStudio.Plugins.Sphere`, each registering two exporters.
+They live in `GumpStudio.Converters` now, alongside POL and the raw layout
+format.
 
-Every exporter now offers both of its dialects as separate menu entries rather
-than hiding one behind a modal options dialog the plugin builds itself. That also
-closed a gap in the POL plugin: it registered only the gump-package dialect, so
-**the layout-string form could not be reached from the application at all**.
-
-Six entries in all: `pol`, `pol-layout`, `runuo`, `runuo-numeric`,
-`sphere-056`, `sphere-099`. `gumpstudio export --format <id>` drives the same
-set from the command line.
+Adding them closed a gap in the POL exporter: it offered only the gump-package
+dialect, so **the layout-string form could not be reached from the application at
+all**. Every dialect became a separate menu entry, and in Phase 7 that collapsed
+back to four entries with the dialect chosen in the export dialog.
 
 ### What the originals got wrong
 
@@ -784,7 +1169,7 @@ Quinted ships **`POLGumpExport.dll`** — namespace `POLGumpExport`, three times
 size, emitting the `GF*` gump-package calls and the layout-string array, with the
 "for gump pkg" header, the "Bare gump" option and "Create Default Texts". That is
 the exporter `src/Plugins/POLGumpExport/` contains, and therefore the one
-`GumpStudio.Plugins.Pol` is a port of. The POL work is already based on the
+`PolScriptBuilder` is a port of. The POL work is already based on the
 newest build, not on r2.
 
 ### What quinted actually changes
@@ -814,11 +1199,11 @@ changes are inside bodies, plus two new properties.
 
 ### The one genuine gap
 
-The rewrite renders label text with the **Unicode fonts only**. `AsciiFonts` is
-loaded but nothing draws with it, so there is no equivalent of quinted's
-`Unicode` toggle and no way to preview a label in one of the ten `fonts.mul`
-faces. `LabelElement.PartialHue` is likewise absent — label hue is applied
-wholesale.
+~~The rewrite renders label text with the **Unicode fonts only**.~~ Closed in
+[Phase 9](#phase-9--a-preview-worth-trusting-):
+every text element chooses a family and an index, so both the 13 Unicode faces
+and the 10 `fonts.mul` ones are reachable. `LabelElement.PartialHue` is still
+absent — label hue is applied wholesale.
 
 This is a **preview-fidelity gap, not an output one**. The gump protocol's `text`
 and `croppedtext` commands carry no font parameter, and neither quinted's
@@ -852,7 +1237,5 @@ model; quinted is the reference for the POL exporter.**
   for every project, reproducibly, including for a one-file xunit.v3 project in
   an empty directory. `eng/run-tests.ps1` launches the test applications
   directly instead. Retry `dotnet test` after an SDK bump.
-- **No exporter has an options dialog.** Class name, namespace and comment
-  settings come from the file name and defaults. Each dialect is a separate menu
-  entry, which covers the choice that actually matters, but the rest is not
-  reachable from the UI — only from the CLI and the API.
+- ~~**No exporter has an options dialog.**~~ Built in Phase 7: dialect, name,
+  namespace and comments are all chosen in the export dialog.

@@ -1,0 +1,33 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.ImportLayoutWindow"
+        Title="Import gump layout"
+        Width="640" Height="520"
+        WindowStartupLocation="CenterOwner">
+
+  <Grid Margin="16" RowDefinitions="Auto,*,Auto,Auto">
+
+    <TextBlock Grid.Row="0" TextWrapping="Wrap" Margin="0,0,0,8"
+               Text="Paste the layout a packet-sniffing tool captured. The {&#160;command&#160;} braces, the [layout] and [text] markers and the header comment are all optional." />
+
+    <TextBox Grid.Row="1"
+             Name="LayoutBox"
+             AcceptsReturn="True"
+             AcceptsTab="True"
+             TextWrapping="NoWrap"
+             FontFamily="Consolas,Menlo,monospace"
+             VerticalContentAlignment="Top"
+             ScrollViewer.HorizontalScrollBarVisibility="Auto"
+             ScrollViewer.VerticalScrollBarVisibility="Auto" />
+
+    <TextBlock Grid.Row="2" Name="Summary" TextWrapping="Wrap" Margin="0,8,0,0" />
+
+    <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right"
+                Spacing="8" Margin="0,12,0,0">
+      <Button Name="PasteButton" Content="Paste from clipboard" />
+      <Button Name="CancelButton" Content="Cancel" MinWidth="80" />
+      <Button Name="AcceptButton" Content="Import" MinWidth="80" IsDefault="True" />
+    </StackPanel>
+
+  </Grid>
+</Window>

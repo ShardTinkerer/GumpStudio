@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Text;
+
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Primitives;
 
@@ -162,7 +165,8 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
 
     public void Visit(LabelElement element)
     {
-        if (art.GetText(element.FontIndex, element.Text, element.Hue) is not { } text)
+        if (art.GetText(element.FontIndex, element.Text, element.Hue, element.FontFamily)
+            is not { } text)
         {
             return;
         }
@@ -189,7 +193,8 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
             canvas.DrawRect(ToRect(element.Bounds), wash);
         }
 
-        if (art.GetText(0, element.InitialText, element.Hue) is not { } text)
+        if (art.GetText(element.FontIndex, element.InitialText, element.Hue, element.FontFamily)
+            is not { } text)
         {
             return;
         }
@@ -220,23 +225,119 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
             DrawOutline(element.Bounds, new SKColor(0x60, 0x60, 0x60, 0xC0));
         }
 
-        // Markup and cliloc substitution are not interpreted; the editor shows
-        // the source text so the author can see what will be sent.
+        // Markup is not interpreted; the editor shows the source text so the
+        // author can see what will be sent. A cliloc is resolved, because its id
+        // says nothing at all about what the player will read — and a gump
+        // captured off the wire is often built from nothing else.
         string preview = element.ContentKind == HtmlContentKind.Localized
-            ? $"#{element.ClilocId}"
+            ? Localized(element)
             : element.Html;
 
-        if (art.GetText(0, preview) is not { } text)
+        if (art.GetText(element.FontIndex, preview, hue: 0, element.FontFamily) is not { } text)
         {
             return;
         }
 
+        // The colour slot is an RGB value, not a hue, so it is applied here
+        // rather than by the font renderer. Glyphs are a white mask, so replacing
+        // their colour while keeping their coverage tints them exactly.
+        SKColor? colour = element.ContentKind == HtmlContentKind.Localized
+            ? GumpColor.ToSkColor(element.Color)
+            : null;
+
+        using SKPaint? tint = colour is { } rgb
+            ? new SKPaint { ColorFilter = SKColorFilter.CreateBlendMode(rgb, SKBlendMode.SrcIn) }
+            : null;
+
         int saved = canvas.Save();
 
         canvas.ClipRect(ToRect(element.Bounds));
-        canvas.DrawImage(text, element.X, element.Y, PixelArt.Sampling);
+        canvas.DrawImage(text, new SKPoint(element.X, element.Y), PixelArt.Sampling, tint);
         canvas.RestoreToCount(saved);
     }
+
+    /// <summary>
+    /// The text a localised area will actually show.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to <c>#id</c> when no client is loaded or the id is not in the
+    /// cliloc table, which is what the editor showed for every localised area
+    /// before this: readable only to someone who had the id memorised.
+    /// </remarks>
+    private string Localized(HtmlElement element)
+    {
+        if (art.GetCliloc(element.ClilocId) is not { } text)
+        {
+            return $"#{element.ClilocId}";
+        }
+
+        return element.Arguments.Length > 0
+            ? Substitute(text, element.Arguments)
+            : text;
+    }
+
+    /// <summary>
+    /// Fills a cliloc's <c>~1_THING~</c> placeholders from the argument list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The client numbers them from one and separates the values with <c>@</c>.
+    /// A placeholder with no argument is left as it stands rather than blanked,
+    /// so a missing value is visible instead of silently disappearing.
+    /// </para>
+    /// <para>
+    /// An argument of the form <c>#1234</c> is itself a cliloc id — the
+    /// <c>xmfhtmltok</c> form uses that to nest one localised string inside
+    /// another — so it is resolved in turn, once, without recursing.
+    /// </para>
+    /// </remarks>
+    private string Substitute(string text, string arguments)
+    {
+        string[] values = arguments.Split('@');
+        StringBuilder built = new(text.Length);
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '~')
+            {
+                built.Append(text[i]);
+
+                continue;
+            }
+
+            int close = text.IndexOf('~', i + 1);
+
+            if (close < 0)
+            {
+                built.Append(text[i..]);
+
+                break;
+            }
+
+            string placeholder = text[(i + 1)..close];
+            int underscore = placeholder.IndexOf('_', StringComparison.Ordinal);
+            string ordinal = underscore < 0 ? placeholder : placeholder[..underscore];
+
+            built.Append(
+                int.TryParse(ordinal, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index)
+                && index >= 1
+                && index <= values.Length
+                    ? Value(values[index - 1])
+                    : text[i..(close + 1)]);
+
+            i = close;
+        }
+
+        return built.ToString();
+    }
+
+    /// <summary>One substitution value, resolving a nested cliloc reference.</summary>
+    private string Value(string argument) =>
+        argument.StartsWith('#')
+        && int.TryParse(
+            argument[1..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int nested)
+            ? art.GetCliloc(nested) ?? argument
+            : argument;
 
     private void DrawArt(SKImage? image, Element element)
     {

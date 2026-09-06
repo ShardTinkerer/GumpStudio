@@ -1,3 +1,4 @@
+using GumpStudio.Core.Elements;
 using GumpStudio.Uo;
 using GumpStudio.Uo.Fonts;
 using GumpStudio.Uo.Graphics;
@@ -32,6 +33,9 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
         _capacity = capacity;
     }
 
+    /// <inheritdoc />
+    public string? GetCliloc(int clilocId) => _data.Clilocs.GetText(clilocId);
+
     /// <summary>Images currently held.</summary>
     public int CachedImageCount
     {
@@ -50,10 +54,16 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
     public SKImage? GetItem(int itemId, int hue = 0, bool partialHue = false) =>
         Get(new ArtKey(ArtKind.Item, itemId, hue, partialHue, null));
 
-    public SKImage? GetText(int fontIndex, string text, int hue = 0) =>
+    public SKImage? GetText(
+        int fontIndex, string text, int hue = 0, GumpFontFamily family = GumpFontFamily.Unicode) =>
         string.IsNullOrEmpty(text)
             ? null
-            : Get(new ArtKey(ArtKind.Text, fontIndex, hue, false, text));
+            : Get(new ArtKey(
+                family == GumpFontFamily.Ascii ? ArtKind.AsciiText : ArtKind.Text,
+                fontIndex,
+                hue,
+                false,
+                text));
 
     public bool TryGetGumpSize(int gumpId, out int width, out int height) =>
         _data.TryGetGumpSize(gumpId, out width, out height);
@@ -102,6 +112,7 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
             ArtKind.Gump => _data.GetGump(key.Id, key.Hue, key.PartialHue),
             ArtKind.Item => _data.GetStatic(key.Id, key.Hue, key.PartialHue),
             ArtKind.Text => RenderText(key),
+            ArtKind.AsciiText => RenderAsciiText(key),
             _ => null,
         };
 
@@ -139,6 +150,30 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
         return glyphs.ToUoImage();
     }
 
+    /// <summary>
+    /// Renders text in one of the ten <c>fonts.mul</c> faces.
+    /// </summary>
+    /// <remarks>
+    /// These carry their own colours, so a hue recolours only the grey pixels —
+    /// the opposite of the Unicode faces, which are a solid white mask.
+    /// </remarks>
+    private UoImage? RenderAsciiText(ArtKey key)
+    {
+        if (key.Text is null || _data.AsciiFonts.Get(key.Id) is not { } font)
+        {
+            return null;
+        }
+
+        if (font.Render(key.Text) is not { } glyphs)
+        {
+            return null;
+        }
+
+        _data.Hues.Get(key.Hue)?.ApplyTo(glyphs.Pixels, onlyGreyPixels: true);
+
+        return glyphs.ToUoImage();
+    }
+
     private void Touch(ArtKey key)
     {
         _order.Remove(key);
@@ -165,6 +200,7 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
         Gump,
         Item,
         Text,
+        AsciiText,
     }
 
     private readonly record struct ArtKey(ArtKind Kind, int Id, int Hue, bool PartialHue, string? Text);

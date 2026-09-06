@@ -16,6 +16,7 @@
         <MenuItem Header="Save _As…" Name="MenuSaveAs" />
         <Separator />
         <MenuItem Header="_Import GumpStudio 1.8 file…" Name="MenuImportLegacy" />
+        <MenuItem Header="Import gump _layout…" Name="MenuImportLayout" />
         <MenuItem Header="_Export" Name="MenuExport" />
         <Separator />
         <MenuItem Header="Set _client folder…" Name="MenuSetClient" />
@@ -75,7 +76,6 @@
         <MenuItem Header="_Move selection to page" Name="MenuMoveToPage" />
       </MenuItem>
 
-      <MenuItem Header="_Plugins" Name="MenuPlugins" />
     </Menu>
 
     <Border DockPanel.Dock="Bottom" Background="#1F1F23" Padding="8,4">

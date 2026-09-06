@@ -1,0 +1,67 @@
+// Created 2026-01-02 03:04:05Z, with Gump Studio.
+// Exported with the Sphere exporter, after the original by Francesco Furiani.
+// Script for 0.99 / 1.0
+
+[DIALOG d_mygump]
+SetLocation=50,60
+NoClose
+NoMove
+NoDispose
+// mastergump 7   // no 0.99 function
+// toggleupperwordcase   // no 0.99 function
+// togglecroppedtext   // no 0.99 function
+// echandleinput   // no 0.99 function
+Page(0)
+ResizePic(0,0,5054,300,200)
+CheckerTrans(5,5,290,190)
+GumpPicTiled(10,10,80,20,5124)
+TextA(20,20,88,"He said \"hi\"")
+TextA(20,35,90,"Clipped text")
+// croppedtext 20 35 120 18 90 0   // no 0.99 function; the line above is the closest it has
+TextA(20,55,0,"")
+TilePic(20,70,3821)
+TilePicHue(45,70,3821,12)
+GumpPic(70,70,1417)
+GumpPic(95,70,1417,22)
+GumpPic(120,70,1417,22)
+// gumppicphued 120 70 1417 22   // no 0.99 function; the line above is the closest it has
+// picinpic 20 95 1417 10 20 60 24   // no 0.99 function
+// picinpicphued 85 95 1417 10 20 60 24 15   // no 0.99 function
+// tilepicasgumppic 150 95 3823 2 3 4   // no 0.99 function
+Button(20,125,247,248,0,1,0)
+// tooltip 1011036 @one	TWO@   // no 0.99 function
+// itemproperty 12345   // no 0.99 function
+Button(60,125,247,248,1,0,5)
+Button(100,125,247,248,1,0,5)
+Button(140,125,247,248,1,0,6)
+// buttontileart 140 125 247 248 1 0 6 3823 8 4 2   // no 0.99 function; the line above is the closest it has
+CheckBox(20,150,210,211,1,0)
+Group(3)
+Radio(60,150,208,209,0,1)
+Radio(100,150,208,209,0,2)
+TextEntryA(20,170,120,20,5,1,"type here")
+TextEntryA(150,170,120,20,5,2,"")
+GumpPic(165,75,1417)
+Page(1)
+Group(3)
+Radio(20,20,208,209,0,3)
+HtmlGumpA(20,40,200,60,"<basefont color=#ffffff>literal \"markup\"",1,1)
+XmfHtmlGump(20,105,200,40,1049004,0,0)
+XmfHtmlGump(20,150,200,40,1049005,1,0)
+// xmfhtmlgumpcolor 20 150 200 40 1049005 1 0 65280   // no 0.99 function; the line above is the closest it has
+XmfHtmlGump(20,195,200,40,1049006,0,1)
+// xmfhtmltok 20 195 200 40 0 1 65280 1049006 @alpha	beta@   // no 0.99 function; the line above is the closest it has
+Button(20,240,247,248,0,0,0)
+
+[DIALOG d_mygump BUTTON]
+ON=5
+// Accept
+SRC.SYSMESSAGE Accepted
+
+ON=5
+// Accept again
+
+ON=6
+// Tiled button
+
+[EOF]

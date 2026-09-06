@@ -258,8 +258,11 @@ public sealed class RadioElement : CheckboxElement
 }
 
 /// <summary>A single-line text input.</summary>
-public sealed class TextEntryElement : ResizableElement
+public sealed class TextEntryElement : ResizableElement, IFontedElement
 {
+    private int _fontIndex = TextElementDefaults.FontIndex;
+    private GumpFontFamily _fontFamily;
+
     private string _initialText = string.Empty;
     private int _hue;
     private int _entryId;
@@ -297,9 +300,26 @@ public sealed class TextEntryElement : ResizableElement
         set => Set(ref _maxLength, value);
     }
 
+    /// <inheritdoc />
+    public int FontIndex
+    {
+        get => _fontIndex;
+        set => Set(ref _fontIndex, value);
+    }
+
+    /// <inheritdoc />
+    public GumpFontFamily FontFamily
+    {
+        get => _fontFamily;
+        set => Set(ref _fontFamily, value);
+    }
+
     protected override void CopyTo(Element target)
     {
         TextEntryElement clone = (TextEntryElement)target;
+
+        clone._fontIndex = _fontIndex;
+        clone._fontFamily = _fontFamily;
 
         clone._initialText = _initialText;
         clone._hue = _hue;

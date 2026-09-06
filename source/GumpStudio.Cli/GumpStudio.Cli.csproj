@@ -11,9 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="../GumpStudio.Core/GumpStudio.Core.csproj" />
     <ProjectReference Include="../GumpStudio.Rendering/GumpStudio.Rendering.csproj" />
-    <ProjectReference Include="../GumpStudio.Plugins.Pol/GumpStudio.Plugins.Pol.csproj" />
-    <ProjectReference Include="../GumpStudio.Plugins.RunUo/GumpStudio.Plugins.RunUo.csproj" />
-    <ProjectReference Include="../GumpStudio.Plugins.Sphere/GumpStudio.Plugins.Sphere.csproj" />
+    <ProjectReference Include="../GumpStudio.Converters/GumpStudio.Converters.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 using System.Globalization;
 
 using GumpStudio.Core.Commands;
+using GumpStudio.App.Controls;
 using GumpStudio.Core.Elements;
 
 namespace GumpStudio.App;
@@ -14,6 +15,8 @@ public enum PropertyEditorKind
     GumpId,
     ItemId,
     Hue,
+    Font,
+    Color,
     Choice,
 }
 
@@ -179,7 +182,7 @@ public sealed class PropertyRow
                 yield return Text("Text", e => ((LabelElement)e).Text, (e, v) => ((LabelElement)e).Text = v);
                 yield return Id("Hue", PropertyEditorKind.Hue,
                     e => ((LabelElement)e).Hue, (e, v) => ((LabelElement)e).Hue = v);
-                yield return Integer("Font", e => ((LabelElement)e).FontIndex, (e, v) => ((LabelElement)e).FontIndex = v);
+                yield return Font();
                 yield return Boolean("Cropped", e => ((LabelElement)e).Cropped, (e, v) => ((LabelElement)e).Cropped = v);
                 break;
 
@@ -228,6 +231,8 @@ public sealed class PropertyRow
                     e => ((TextEntryElement)e).EntryId, (e, v) => ((TextEntryElement)e).EntryId = v);
                 yield return Integer("Max length",
                     e => ((TextEntryElement)e).MaxLength, (e, v) => ((TextEntryElement)e).MaxLength = v);
+
+                yield return Font();
                 break;
 
             case HtmlElement:
@@ -242,10 +247,15 @@ public sealed class PropertyRow
                     e => ((HtmlElement)e).ShowScrollbar, (e, v) => ((HtmlElement)e).ShowScrollbar = v);
                 yield return Boolean("Background",
                     e => ((HtmlElement)e).ShowBackground, (e, v) => ((HtmlElement)e).ShowBackground = v);
-                yield return Integer("Color",
-                    e => ((HtmlElement)e).Color, (e, v) => ((HtmlElement)e).Color = v);
+                yield return new PropertyRow("Color", PropertyEditorKind.Color,
+                        e => ((HtmlElement)e).Color, (e, v) => ((HtmlElement)e).Color = ToInt(v))
+                    .Describe(
+                        "Text colour for a localised area. Not a hue — a plain colour, "
+                        + "which the client stores as RGB555.");
                 yield return Text("Cliloc args",
                     e => ((HtmlElement)e).Arguments, (e, v) => ((HtmlElement)e).Arguments = v);
+
+                yield return Font();
                 break;
 
             default:
@@ -278,6 +288,31 @@ public sealed class PropertyRow
     private static PropertyRow Id(
         string name, PropertyEditorKind kind, Func<Element, int> get, Action<Element, int> set) =>
         new(name, kind, e => get(e), (e, v) => set(e, ToInt(v)));
+
+    /// <summary>
+    /// The preview font, as one row covering both the family and the face.
+    /// </summary>
+    /// <remarks>
+    /// Preview only: the gump protocol's text commands carry no font, so nothing
+    /// an exporter writes changes with it. It exists because a designer needs to
+    /// see roughly what the player will, and because the renderer used to draw
+    /// every localised area in the ornate blackletter face with no way to change it.
+    /// </remarks>
+    private static PropertyRow Font() =>
+        new("Font", PropertyEditorKind.Font,
+            e => new FontChoice(((IFontedElement)e).FontFamily, ((IFontedElement)e).FontIndex),
+            (e, v) =>
+            {
+                if (v is not FontChoice choice)
+                {
+                    return;
+                }
+
+                IFontedElement fonted = (IFontedElement)e;
+
+                fonted.FontFamily = choice.Family;
+                fonted.FontIndex = choice.Index;
+            });
 
     private static PropertyRow Choice(
         string name, IReadOnlyList<string> choices, Func<Element, string> get, Action<Element, string> set) =>

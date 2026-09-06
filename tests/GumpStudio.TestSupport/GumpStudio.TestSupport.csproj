@@ -9,4 +9,8 @@
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../source/GumpStudio.Core/GumpStudio.Core.csproj" />
+  </ItemGroup>
+
 </Project>
