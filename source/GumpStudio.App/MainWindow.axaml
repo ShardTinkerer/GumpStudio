@@ -30,6 +30,12 @@
         <MenuItem Header="Select _all" Name="MenuSelectAll" InputGesture="Ctrl+A" />
         <MenuItem Header="_Delete" Name="MenuDelete" InputGesture="Delete" />
         <MenuItem Header="_Group selection" Name="MenuGroup" InputGesture="Ctrl+G" />
+        <MenuItem Header="_Ungroup" Name="MenuUngroup" InputGesture="Ctrl+Shift+G" />
+        <Separator />
+        <MenuItem Header="Bring to _front" Name="MenuBringToFront" InputGesture="Ctrl+Shift+Up" />
+        <MenuItem Header="Bring for_ward" Name="MenuBringForward" InputGesture="Ctrl+Up" />
+        <MenuItem Header="Send back_ward" Name="MenuSendBackward" InputGesture="Ctrl+Down" />
+        <MenuItem Header="Send to _back" Name="MenuSendToBack" InputGesture="Ctrl+Shift+Down" />
       </MenuItem>
 
       <MenuItem Header="_View">
@@ -75,8 +81,12 @@
     <!-- Element tree and properties -->
     <Border DockPanel.Dock="Right" Width="300" Background="#26262A" Padding="6">
       <Grid RowDefinitions="Auto,2*,Auto,3*">
-        <TextBlock Grid.Row="0" Text="Elements" Foreground="#9A9AA0"
-                   FontWeight="Bold" Margin="2,2,2,6" />
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,6" Spacing="6">
+          <TextBlock Text="Elements" Foreground="#9A9AA0" FontWeight="Bold" />
+          <!-- Drawing order is the list order, and it is not obvious which end
+               is which until something is hidden behind something else. -->
+          <TextBlock Text="back → front" Foreground="#6A6A70" VerticalAlignment="Center" />
+        </StackPanel>
 
         <ListBox Grid.Row="1" Name="ElementList" Background="#1F1F23" />
 

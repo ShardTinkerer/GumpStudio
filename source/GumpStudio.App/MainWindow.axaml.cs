@@ -1,10 +1,13 @@
 using System.Globalization;
 
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+
+using CommunityToolkit.Mvvm.Input;
 
 using GumpStudio.App.Controls;
 using GumpStudio.Core.Commands;
@@ -54,6 +57,12 @@ public sealed partial class MainWindow : Window, IDisposable
 
         BuildToolbox();
         WireMenus();
+        BindShortcuts();
+
+        // One menu instance per host: a ContextMenu belongs to a single control.
+        _canvas.ContextMenu = BuildContextMenu();
+        _elementList.ContextMenu = BuildContextMenu();
+
         LoadGridSettings();
 
         LoadExternalPlugins();
@@ -82,6 +91,11 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuSelectAll", () => { _session.Canvas.SelectAll(); RefreshAll(); });
         Click("MenuDelete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
         Click("MenuGroup", GroupSelection);
+        Click("MenuUngroup", UngroupSelection);
+        Click("MenuBringToFront", () => Reorder(_session.Canvas.BringToFront, "front"));
+        Click("MenuBringForward", () => Reorder(_session.Canvas.BringForward, "forward"));
+        Click("MenuSendBackward", () => Reorder(_session.Canvas.SendBackward, "backward"));
+        Click("MenuSendToBack", () => Reorder(_session.Canvas.SendToBack, "back"));
         Click("MenuAddPage", () => { _session.Document.AddPage(); RefreshAll(); });
         Click("MenuShowPage0", ToggleSharedPage);
         Click("MenuShowGrid", ApplyGridSettings);
@@ -95,6 +109,130 @@ public sealed partial class MainWindow : Window, IDisposable
         ClickAsync("MenuSaveAs", () => SaveAsync(null));
         ClickAsync("MenuImportLegacy", ImportLegacyAsync);
         ClickAsync("MenuSetClient", () => ChooseClientAsync(force: true));
+    }
+
+    /// <summary>
+    /// Registers the keyboard shortcuts the menu advertises.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>InputGesture</c> on a <see cref="MenuItem"/> only <em>draws</em> the
+    /// shortcut next to the item; it does not make the key do anything. Every
+    /// gesture in the menu bar was therefore decorative — Ctrl+G, Ctrl+S, Ctrl+Z
+    /// and the rest all did nothing. These bindings are what actually run them.
+    /// </para>
+    /// <para>
+    /// They live on the window, so a control that has already handled the key —
+    /// a text box swallowing Ctrl+A or Delete while the caret is in it — stops
+    /// the event before it arrives here.
+    /// </para>
+    /// </remarks>
+    private void BindShortcuts()
+    {
+        Bind("Ctrl+N", () => _session.NewDocument());
+        Bind("Ctrl+Z", () => { _session.History.Undo(); RefreshAll(); });
+        Bind("Ctrl+Y", () => { _session.History.Redo(); RefreshAll(); });
+        Bind("Ctrl+Shift+Z", () => { _session.History.Redo(); RefreshAll(); });
+        Bind("Ctrl+A", () => { _session.Canvas.SelectAll(); RefreshAll(); });
+        Bind("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
+        Bind("Ctrl+G", GroupSelection);
+        Bind("Ctrl+Shift+G", UngroupSelection);
+        Bind("Ctrl+Shift+Up", () => Reorder(_session.Canvas.BringToFront, "front"));
+        Bind("Ctrl+Up", () => Reorder(_session.Canvas.BringForward, "forward"));
+        Bind("Ctrl+Down", () => Reorder(_session.Canvas.SendBackward, "backward"));
+        Bind("Ctrl+Shift+Down", () => Reorder(_session.Canvas.SendToBack, "back"));
+
+        BindAsync("Ctrl+O", OpenAsync);
+        BindAsync("Ctrl+S", () => SaveAsync(_session.DocumentPath));
+        BindAsync("Ctrl+Shift+S", () => SaveAsync(null));
+    }
+
+    private void Bind(string gesture, Action action) =>
+        KeyBindings.Add(new KeyBinding
+        {
+            Gesture = KeyGesture.Parse(gesture),
+            Command = new RelayCommand(() => Guarded(action)),
+        });
+
+    private void BindAsync(string gesture, Func<Task> action) =>
+        KeyBindings.Add(new KeyBinding
+        {
+            Gesture = KeyGesture.Parse(gesture),
+            Command = new AsyncRelayCommand(() => GuardedAsync(action)),
+        });
+
+    /// <summary>
+    /// Builds the canvas context menu.
+    /// </summary>
+    /// <remarks>
+    /// The original had no context menu on the design surface at all: every
+    /// action meant a trip to the menu bar. Items are never rebuilt — only their
+    /// enabled state is refreshed as the menu opens, so a disabled entry still
+    /// shows what is possible and where to find it.
+    /// </remarks>
+    private ContextMenu BuildContextMenu()
+    {
+        MenuItem undo = Item("Undo", () => { _session.History.Undo(); RefreshAll(); });
+        MenuItem redo = Item("Redo", () => { _session.History.Redo(); RefreshAll(); });
+        MenuItem group = Item("Group selection", GroupSelection);
+        MenuItem ungroup = Item("Ungroup", UngroupSelection);
+        MenuItem front = Item("Bring to front", () => Reorder(_session.Canvas.BringToFront, "front"));
+        MenuItem forward = Item("Bring forward", () => Reorder(_session.Canvas.BringForward, "forward"));
+        MenuItem backward = Item("Send backward", () => Reorder(_session.Canvas.SendBackward, "backward"));
+        MenuItem back = Item("Send to back", () => Reorder(_session.Canvas.SendToBack, "back"));
+        MenuItem delete = Item("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
+
+        ContextMenu menu = new()
+        {
+            ItemsSource = new List<object>
+            {
+                undo,
+                redo,
+                new Separator(),
+                group,
+                ungroup,
+                new Separator(),
+                front,
+                forward,
+                backward,
+                back,
+                new Separator(),
+                delete,
+                new Separator(),
+                Item("Select all", () => { _session.Canvas.SelectAll(); RefreshAll(); }),
+                Item("Gump properties…", () => _ = GuardedAsync(EditGumpPropertiesAsync)),
+            },
+        };
+
+        menu.Opening += (_, _) =>
+        {
+            int selected = _session.Canvas.Selection.Count;
+            bool anyGroup = _session.Canvas.Selection.Any(e => e is GroupElement { IsPageRoot: false });
+
+            undo.IsEnabled = _session.History.CanUndo;
+            redo.IsEnabled = _session.History.CanRedo;
+
+            // Naming what will be undone is the difference between a safe click
+            // and a guess.
+            undo.Header = _session.History.UndoDescription is { } undoing ? $"Undo {undoing}" : "Undo";
+            redo.Header = _session.History.RedoDescription is { } redoing ? $"Redo {redoing}" : "Redo";
+
+            group.IsEnabled = selected >= 2;
+            ungroup.IsEnabled = anyGroup;
+            front.IsEnabled = forward.IsEnabled = backward.IsEnabled = back.IsEnabled = selected > 0;
+            delete.IsEnabled = selected > 0;
+        };
+
+        return menu;
+
+        MenuItem Item(string header, Action action)
+        {
+            MenuItem item = new() { Header = header };
+
+            item.Click += (_, _) => Guarded(action);
+
+            return item;
+        }
     }
 
     private void Click(string name, Action action)
@@ -188,15 +326,55 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void GroupSelection()
     {
-        if (_session.Canvas.Selection.Count < 2)
+        if (_session.Canvas.Group() is null)
         {
             SetStatus("Select at least two elements to group.");
 
             return;
         }
 
-        _session.History.Push(new GroupElementsCommand([.. _session.Canvas.Selection]));
         RefreshAll();
+    }
+
+    private void UngroupSelection()
+    {
+        int dissolved = _session.Canvas.Ungroup();
+
+        if (dissolved == 0)
+        {
+            SetStatus("Select a group to ungroup.");
+
+            return;
+        }
+
+        RefreshAll();
+        SetStatus(dissolved == 1 ? "Ungrouped." : $"Ungrouped {dissolved} groups.");
+    }
+
+    /// <summary>Applies a drawing-order change and says what happened.</summary>
+    /// <remarks>
+    /// Silence when nothing moves is ambiguous — an element already at the front
+    /// looks the same as a shortcut that is not wired up. Saying so distinguishes
+    /// them.
+    /// </remarks>
+    private void Reorder(Func<bool> operation, string where)
+    {
+        if (_session.Canvas.Selection.Count == 0)
+        {
+            SetStatus("Select something to reorder.");
+
+            return;
+        }
+
+        if (!operation())
+        {
+            SetStatus($"Already at the {where}.");
+
+            return;
+        }
+
+        RefreshAll();
+        SetStatus($"Moved {where}.");
     }
 
     /// <summary>

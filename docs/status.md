@@ -153,7 +153,7 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 430 tests across the solution; 6 skip when the single-client
+Done. 447 tests across the solution; 6 skip when the single-client
 environment variables are unset, and the client-data theories skip entirely when
 no installation is configured, so CI stays green.
 
@@ -197,6 +197,47 @@ Fixed while testing those: selecting an element in the element list left the
 property panel showing "Nothing selected". The list rebuilt its item source on
 every refresh, and the resulting selection-reset event raced the suppression
 flag. It now rebuilds only when the page contents actually change.
+
+### Drawing order, ungrouping, and shortcuts that work
+
+Reported after using the editor: there was no way to ungroup, no way to change
+drawing order, no context menu, and Ctrl+G did nothing.
+
+**Shortcuts never worked at all.** `InputGesture` on an Avalonia `MenuItem` only
+*draws* the shortcut beside the item — it does not bind the key. Every gesture in
+the menu bar was decorative: Ctrl+N, Ctrl+O, Ctrl+S, Ctrl+Z, Ctrl+Y, Ctrl+A and
+Ctrl+G all did nothing. They are real `KeyBindings` on the window now, so a
+control that has already handled the key — a text box swallowing Ctrl+A or Delete
+while the caret is in it — still wins.
+
+**Drawing order had no UI.** It is the whole of layering in a gump: the last
+child of a group draws in front. A background added after an image covered it
+permanently, and the only recovery was to delete everything and place it again in
+the right sequence. Four operations now exist — bring to front, bring forward,
+send backward, send to back — on Ctrl+Shift+Up, Ctrl+Up, Ctrl+Down and
+Ctrl+Shift+Down. A multi-element move keeps the selection's own relative order and
+steps from the destination end, so the members cannot shuffle past each other.
+
+**Ungroup** is the counterpart to a Group command that had shipped without one.
+Children return to the group's own slot in the z-order rather than landing on
+top, keep their position on screen, and end up selected so a different subset can
+be grouped immediately.
+
+**A context menu** on the canvas and on the element list carries undo, redo,
+group, ungroup, the four ordering commands, delete, select all and gump
+properties. Undo and redo name what they will undo. Right-clicking an element
+selects it first, unless it is already part of a multiple selection — otherwise
+"bring these four forward" would collapse to one the moment you reached for the
+menu.
+
+Two things that had to be got right for the menu to appear at all: the canvas
+returns from its pointer-pressed handler without capturing on a right press, and
+does not mark the matching release handled. Marking it handled swallows the
+context-menu request Avalonia raises from that release, and the menu silently
+never opens.
+
+The element list is also labelled **back → front** now, because the list order
+*is* the drawing order and nothing said so.
 
 ### Snap to grid, built in
 
@@ -253,7 +294,8 @@ elements before `page 1` already expresses the same thing.
 - Clipboard cut/copy/paste.
 - A plugin manager UI for enabling and ordering plugins; discovery currently
   loads everything it finds.
-- Element reordering from the element list — grouping is on the Edit menu only.
+- Drag-to-reorder in the element list. The four ordering commands cover the same
+  ground from the keyboard and the context menu.
 
 ## Phase 5 — Plugins and the POL exporter ✅
 

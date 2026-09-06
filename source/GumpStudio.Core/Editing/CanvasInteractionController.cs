@@ -140,7 +140,7 @@ public sealed class CanvasInteractionController(UndoHistory history)
 
         if (modifiers.HasFlag(InputModifiers.Extend))
         {
-            Toggle(hit);
+            ToggleCore(hit);
         }
         else if (!_selection.Contains(hit))
         {
@@ -298,6 +298,171 @@ public sealed class CanvasInteractionController(UndoHistory history)
         OnChanged();
     }
 
+    /// <summary>
+    /// Wraps the selection in a new group.
+    /// </summary>
+    /// <returns>The group, or null when there was nothing to group.</returns>
+    public GroupElement? Group()
+    {
+        if (_selection.Count < 2)
+        {
+            return null;
+        }
+
+        GroupElementsCommand command = new([.. _selection]);
+
+        history.Push(command);
+        Select(command.Group);
+
+        return command.Group;
+    }
+
+    /// <summary>
+    /// Dissolves every group in the selection, one undo entry for the lot.
+    /// </summary>
+    /// <returns>How many groups were dissolved.</returns>
+    /// <remarks>
+    /// The counterpart to <see cref="Group"/>, which the original never had: once
+    /// elements were grouped the only way back was to delete the group and place
+    /// its contents again.
+    /// </remarks>
+    public int Ungroup()
+    {
+        List<GroupElement> groups = [.. _selection.OfType<GroupElement>().Where(g => !g.IsPageRoot)];
+
+        if (groups.Count == 0)
+        {
+            return 0;
+        }
+
+        List<Element> freed = [];
+
+        using (UndoHistory.CompositeScope scope = history.BeginComposite("Ungroup"))
+        {
+            foreach (GroupElement group in groups)
+            {
+                freed.AddRange(group.Children);
+
+                scope.Run(new UngroupElementsCommand(group));
+            }
+        }
+
+        // Selecting what came out keeps the user's attention on the same pixels,
+        // and lets them immediately group a different subset.
+        ClearSelection();
+
+        foreach (Element element in freed)
+        {
+            Add(element);
+        }
+
+        OnChanged();
+
+        return groups.Count;
+    }
+
+    /// <summary>Moves the selection to the front of its parent's drawing order.</summary>
+    public bool BringToFront() => Reorder(ZOrder.Front);
+
+    /// <summary>Moves the selection to the back of its parent's drawing order.</summary>
+    public bool SendToBack() => Reorder(ZOrder.Back);
+
+    /// <summary>Moves the selection one step towards the front.</summary>
+    public bool BringForward() => Reorder(ZOrder.Forward);
+
+    /// <summary>Moves the selection one step towards the back.</summary>
+    public bool SendBackward() => Reorder(ZOrder.Backward);
+
+    private enum ZOrder
+    {
+        Front,
+        Back,
+        Forward,
+        Backward,
+    }
+
+    /// <summary>
+    /// Applies a drawing-order change to the whole selection.
+    /// </summary>
+    /// <returns>True when anything actually moved.</returns>
+    /// <remarks>
+    /// <para>
+    /// Drawing order is the whole of layering in a gump — the last child of a
+    /// group draws in front — and the original had no way to change it. A
+    /// background dropped in after an image covered it permanently, and the only
+    /// recovery was to delete everything and place it again in the right order.
+    /// </para>
+    /// <para>
+    /// A multi-element move keeps the selection's own relative order, and steps
+    /// from the destination end so the elements do not shuffle past each other on
+    /// the way. An element already against the end it is being moved towards
+    /// stays put rather than pushing its neighbours around.
+    /// </para>
+    /// </remarks>
+    private bool Reorder(ZOrder direction)
+    {
+        if (_selection.Count == 0)
+        {
+            return false;
+        }
+
+        bool moved = false;
+
+        using UndoHistory.CompositeScope scope = history.BeginComposite("Reorder");
+
+        // Grouped by parent, because "the front" means the end of the list the
+        // element actually lives in.
+        foreach (IGrouping<GroupElement, Element> family in _selection
+            .Where(e => e.Parent is not null)
+            .GroupBy(e => e.Parent!))
+        {
+            GroupElement parent = family.Key;
+            List<Element> ordered = [.. family.OrderBy(parent.IndexOf)];
+
+            // Towards the front, the topmost element moves first; towards the
+            // back, the bottommost does.
+            if (direction is ZOrder.Front or ZOrder.Forward)
+            {
+                ordered.Reverse();
+            }
+
+            int edge = direction switch
+            {
+                ZOrder.Front => parent.Children.Count - 1,
+                ZOrder.Back => 0,
+                _ => -1,
+            };
+
+            foreach (Element element in ordered)
+            {
+                int from = parent.IndexOf(element);
+                int to = direction switch
+                {
+                    ZOrder.Front => edge--,
+                    ZOrder.Back => edge++,
+                    ZOrder.Forward => from + 1,
+                    _ => from - 1,
+                };
+
+                if (to == from || to < 0 || to >= parent.Children.Count)
+                {
+                    continue;
+                }
+
+                scope.Run(new ReorderElementCommand(element, to));
+
+                moved = true;
+            }
+        }
+
+        if (moved)
+        {
+            OnChanged();
+        }
+
+        return moved;
+    }
+
     /// <summary>Deletes the selection.</summary>
     public void DeleteSelection()
     {
@@ -438,7 +603,17 @@ public sealed class CanvasInteractionController(UndoHistory history)
         _selection.Add(element);
     }
 
-    private void Toggle(Element element)
+    /// <summary>Adds an element to the selection, or removes it if already there.</summary>
+    /// <remarks>What a ctrl-click does, exposed so the element list can do it too.</remarks>
+    public void Toggle(Element element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+
+        ToggleCore(element);
+        OnChanged();
+    }
+
+    private void ToggleCore(Element element)
     {
         if (_selection.Remove(element))
         {

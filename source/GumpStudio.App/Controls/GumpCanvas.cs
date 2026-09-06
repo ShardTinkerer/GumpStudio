@@ -187,10 +187,47 @@ public sealed class GumpCanvas : Control, IDisposable
 
         Focus();
 
-        _session.Canvas.PointerPressed(ToGump(e.GetPosition(this)), ToModifiers(e.KeyModifiers));
+        GumpPoint at = ToGump(e.GetPosition(this));
+
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            SelectForContextMenu(at);
+
+            // Deliberately not handled and not captured: Avalonia opens the
+            // context menu itself, and a captured pointer would leave the menu
+            // unable to take the release.
+            return;
+        }
+
+        _session.Canvas.PointerPressed(at, ToModifiers(e.KeyModifiers));
 
         e.Pointer.Capture(this);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Makes the right-clicked element the one the context menu will act on.
+    /// </summary>
+    /// <remarks>
+    /// Right-clicking inside an existing multiple selection keeps it, which is
+    /// what every editor does: otherwise "bring these four to the front" would
+    /// collapse to one element the moment you reached for the menu.
+    /// </remarks>
+    private void SelectForContextMenu(GumpPoint at)
+    {
+        Element? hit = _session!.Canvas.HitTest(at);
+
+        if (hit is null)
+        {
+            _session.Canvas.Select(null);
+        }
+        else if (!_session.Canvas.Selection.Contains(hit))
+        {
+            _session.Canvas.Select(hit);
+        }
+
+        InvalidateVisual();
+        InteractionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     protected override void OnPointerMoved(PointerEventArgs e)
@@ -285,6 +322,14 @@ public sealed class GumpCanvas : Control, IDisposable
         base.OnPointerReleased(e);
 
         if (_session is null)
+        {
+            return;
+        }
+
+        // A right-press started no gesture and captured nothing. Marking its
+        // release handled would swallow the context-menu request Avalonia raises
+        // from it, which is why the menu never appeared.
+        if (e.InitialPressMouseButton == MouseButton.Right)
         {
             return;
         }

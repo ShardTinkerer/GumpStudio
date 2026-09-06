@@ -212,6 +212,9 @@ public sealed class GroupElementsCommand : IUndoableCommand
 
     public string Description => "Group";
 
+    /// <summary>The group this command creates.</summary>
+    public GroupElement Group => _group;
+
     public void Execute()
     {
         // The group sits at the top-left of what it contains, and children are
@@ -278,4 +281,75 @@ public sealed class SetGumpPropertiesCommand : IUndoableCommand
     public void Execute() => _document.Properties = _after.Clone();
 
     public void Undo() => _document.Properties = _before.Clone();
+}
+
+/// <summary>
+/// Dissolves a group, returning its children to the group's own parent.
+/// </summary>
+/// <remarks>
+/// The inverse of <see cref="GroupElementsCommand"/>. Children are rebased by
+/// the group's offset so nothing appears to move, and they land where the group
+/// sat in the z-order rather than on top of everything.
+/// </remarks>
+public sealed class UngroupElementsCommand : IUndoableCommand
+{
+    private readonly GroupElement _group;
+    private readonly GroupElement _parent;
+    private readonly List<(Element Element, GumpPoint Location)> _children = [];
+
+    private int _index;
+
+    public UngroupElementsCommand(GroupElement group)
+    {
+        ArgumentNullException.ThrowIfNull(group);
+
+        if (group.IsPageRoot)
+        {
+            throw new InvalidOperationException("A page root cannot be ungrouped.");
+        }
+
+        _group = group;
+        _parent = group.Parent
+            ?? throw new InvalidOperationException("Cannot ungroup an element that has no parent.");
+
+        foreach (Element child in group.Children)
+        {
+            _children.Add((child, child.Location));
+        }
+    }
+
+    public string Description => "Ungroup";
+
+    public void Execute()
+    {
+        _index = _parent.IndexOf(_group);
+
+        GumpPoint offset = _group.Location;
+
+        _parent.Remove(_group);
+
+        // Inserted in order at the group's own slot, so the children keep both
+        // their relative z-order and their depth relative to everything else.
+        for (int i = 0; i < _children.Count; i++)
+        {
+            (Element element, GumpPoint location) = _children[i];
+
+            _group.Remove(element);
+            element.Location = location.Offset(offset.X, offset.Y);
+
+            _parent.Insert(Math.Min(_index + i, _parent.Children.Count), element);
+        }
+    }
+
+    public void Undo()
+    {
+        foreach ((Element element, GumpPoint location) in _children)
+        {
+            _parent.Remove(element);
+            element.Location = location;
+            _group.Add(element);
+        }
+
+        _parent.Insert(Math.Min(_index, _parent.Children.Count), _group);
+    }
 }
