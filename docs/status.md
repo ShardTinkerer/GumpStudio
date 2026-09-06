@@ -616,23 +616,72 @@ formatting, like the POL one. On top of that:
   page button dismissed the gump instead of switching page.
 - **Radio groups leaked across pages**, the same defect the POL exporter had.
 
-## The 1.8r3 binaries
+## The three 1.8 builds in `external/`
 
-`external/` holds both `Gumpstudio1.8r2` and `Gumpstudio1.8r3`. r3 was checked
-in case the rewrite was tracking a superseded release. It is not.
+`external/` holds `Gumpstudio1.8r2`, `Gumpstudio1.8r3`, and
+`Gumpstudio1.8r3-quinted` — a 2014 community build by staticz. Each was checked
+in case the rewrite was tracking a superseded release.
 
-Only two assemblies differ at all. `GumpStudio.exe`, `UOFont.dll` and **every
-plugin** are byte-identical between the two releases.
+### `-quinted` is what `src/` was decompiled from
 
-| Assembly | Difference in r3 |
+Worth stating plainly, because this page previously implied r2 was the reference
+for everything. r2 ships `POLExport.dll`: a different, much smaller exporter in
+namespace `POLExport` that emits `CreateGump(0,0,0,0)` and targets Hesinde.
+Quinted ships **`POLGumpExport.dll`** — namespace `POLGumpExport`, three times the
+size, emitting the `GF*` gump-package calls and the layout-string array, with the
+"for gump pkg" header, the "Bare gump" option and "Create Default Texts". That is
+the exporter `src/Plugins/POLGumpExport/` contains, and therefore the one
+`GumpStudio.Plugins.Pol` is a port of. The POL work is already based on the
+newest build, not on r2.
+
+### What quinted actually changes
+
+`GumpStudio.exe` and every plugin except the POL one are byte-identical to r2.
+`GumpStudioCore.dll` has **no public method signature differences at all**; the
+changes are inside bodies, plus two new properties.
+
+| Assembly | Change |
 |---|---|
-| `GumpStudioCore.dll` | VB designer field renames (`_Panel1` for `Panel1`) and the removal of `My.Settings`. No behaviour change. |
-| `Ultima.dll` | Drops `FastBitmap` and `PixelData`; adds `ClientProcessHandle`, `ClientWindowHandle`, `NativeMethods`, `Skill`, `SkillCategories`, `SkillCategory`, `SkillCategoryData`, `SkillData` and `Skills`. |
+| `UOFont.dll` | ASCII font array was filled from index 1, leaving slot 0 null and every font off by one — fixed to 0-based. Character lookup pinned to code page 1251 instead of the locale's. Unicode fonts extended from 3 files to 13, and their index also made 0-based. Glyph cache grown from 1001 to 1120 entries. |
+| `GumpStudioCore.dll` | `LabelElement` gains `Unicode` and `PartialHue`; the font-range check widens from "1 to 3" to "0 to 10 for ansi and upto 12 for unicode"; `LabelElementVersion` goes to 3, and loading an older file **decrements `FontIndex`** to match the new 0-based indexing. Debug tracing removed. |
+| `Ultima.dll` | A newer UOSDK snapshot: drops `Animations`, `BodyConverter`, `Map` and `FastBitmap`, adds `Skills`, `ClientProcessHandle` and `NativeMethods`. **Still MUL-only — no UOP, no MegaCliloc.** |
 
-The `Ultima` additions are skill-tree types and process-memory handles pulled in
-from a newer upstream UOSDK snapshot. Nothing in GumpStudio references them, and
-a gump editor has no use for either. **r3 contributes nothing the rewrite needs,
-and r2 remains the behaviour reference.**
+### Where the rewrite already stands
+
+- **Unicode fonts.** Discovered by enumerating `unifont*.mul` rather than hard-coding
+  a count, so 3, 7 and 13-font clients all work. Quinted hard-codes 13 and throws
+  if a file is absent.
+- **Font indexing.** Already 0-based for both families.
+- **The glyph-cache landmine.** Quinted only grew the fixed array to 1120 entries;
+  it is still indexed by an unbounded code point, so anything at or above U+0460
+  still crashes. The rewrite uses a dictionary.
+- **`Ultima`.** Far ahead: UOP containers, MegaCliloc, all three tiledata layouts,
+  verified against fourteen clients.
+- **The POL exporter.** Already the quinted one, with its inherited defects fixed.
+
+### The one genuine gap
+
+The rewrite renders label text with the **Unicode fonts only**. `AsciiFonts` is
+loaded but nothing draws with it, so there is no equivalent of quinted's
+`Unicode` toggle and no way to preview a label in one of the ten `fonts.mul`
+faces. `LabelElement.PartialHue` is likewise absent — label hue is applied
+wholesale.
+
+This is a **preview-fidelity gap, not an output one**. The gump protocol's `text`
+and `croppedtext` commands carry no font parameter, and neither quinted's
+exporter nor any exporter in `src/` ever writes `FontIndex`, `Unicode` or
+`PartialHue`. Nothing about the generated script changes.
+
+The related loose end is import: quinted decrements `FontIndex` when reading a
+file written before version 3, and `LegacyGumpImporter` does not. A genuine
+1.8-era `.gump` therefore previews one font off — again, only in the designer.
+
+### r3
+
+r3 sits between the two and contributes nothing. Only `GumpStudioCore.dll` and
+`Ultima.dll` differ from r2, by VB designer field renames and the same
+skill-tree additions quinted has. **r2 remains the reference for the element
+model; quinted is the reference for the POL exporter.**
 
 ## Known gaps
 
