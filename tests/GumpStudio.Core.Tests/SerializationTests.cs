@@ -22,6 +22,10 @@ public class GumpXmlSerializerTests
         document.Properties.Closable = false;
         document.Properties.Disposable = false;
         document.Properties.TypeId = 42;
+        document.Properties.MasterGumpId = 3000;
+        document.Properties.UpperWordCase = true;
+        document.Properties.CroppedText = true;
+        document.Properties.EnhancedClientInput = true;
 
         GumpPage page = document.Pages[0];
 
@@ -35,7 +39,33 @@ public class GumpXmlSerializerTests
 
         page.Root.Add(new AlphaElement { Location = new GumpPoint(5, 5), Size = new GumpSize(390, 290) });
         page.Root.Add(new TiledElement { Location = new GumpPoint(8, 8), Size = new GumpSize(50, 50), GumpId = 4, Hue = 7 });
-        page.Root.Add(new ImageElement { Location = new GumpPoint(10, 10), GumpId = 1417, Hue = 33 });
+        page.Root.Add(new ImageElement
+        {
+            Location = new GumpPoint(10, 10),
+            GumpId = 1417,
+            Hue = 33,
+            PartialHue = true,
+        });
+
+        page.Root.Add(new PicInPicElement
+        {
+            Location = new GumpPoint(12, 14),
+            Size = new GumpSize(60, 24),
+            GumpId = 9000,
+            SourceX = 5,
+            SourceY = 6,
+            Hue = 21,
+            PartialHue = true,
+        });
+
+        page.Root.Add(new TileAsGumpElement
+        {
+            Location = new GumpPoint(16, 18),
+            ItemId = 3823,
+            LinkId = 2,
+            ParamB = 3,
+            ParamC = 4,
+        });
         page.Root.Add(new ItemElement { Location = new GumpPoint(20, 20), ItemId = 3821, Hue = 12 });
         page.Root.Add(new LabelElement
         {
@@ -44,7 +74,10 @@ public class GumpXmlSerializerTests
             Hue = 88,
             FontIndex = 3,
             Cropped = true,
+            Size = new GumpSize(90, 18),
             Comment = "a comment",
+            TooltipClilocId = 1042971,
+            TooltipArguments = "Bob@42",
         });
 
         page.Root.Add(new ButtonElement
@@ -55,6 +88,11 @@ public class GumpXmlSerializerTests
             Kind = ButtonKind.Page,
             Param = 2,
             CodeBehind = "// handler",
+            TileId = 3821,
+            TileHue = 33,
+            TileX = 4,
+            TileY = 5,
+            ItemPropertySerial = 0x40001234,
         });
 
         page.Root.Add(new CheckboxElement
@@ -95,6 +133,8 @@ public class GumpXmlSerializerTests
             ShowScrollbar = true,
             ShowBackground = true,
             ContentKind = HtmlContentKind.Localized,
+            Color = 0x7FFF,
+            Arguments = "Bob@42",
         });
 
         GroupElement group = new() { Name = "Nested", Location = new GumpPoint(100, 100) };
@@ -149,6 +189,104 @@ public class GumpXmlSerializerTests
         Assert.False(reloaded.Properties.Closable);
         Assert.False(reloaded.Properties.Disposable);
         Assert.Equal(42, reloaded.Properties.TypeId);
+        Assert.Equal(3000, reloaded.Properties.MasterGumpId);
+        Assert.True(reloaded.Properties.UpperWordCase);
+        Assert.True(reloaded.Properties.CroppedText);
+        Assert.True(reloaded.Properties.EnhancedClientInput);
+    }
+
+    [Fact]
+    public void PreservesTheCommandsAddedAfterVersion18()
+    {
+        GumpDocument reloaded = GumpXmlSerializer.FromXml(GumpXmlSerializer.ToXml(BuildSample()));
+        IReadOnlyList<Element> children = reloaded.Pages[0].Root.Children;
+
+        PicInPicElement pic = children.OfType<PicInPicElement>().Single();
+
+        Assert.Equal(9000, pic.GumpId);
+        Assert.Equal(5, pic.SourceX);
+        Assert.Equal(6, pic.SourceY);
+        Assert.Equal(new GumpSize(60, 24), pic.Size);
+        Assert.True(pic.PartialHue);
+
+        TileAsGumpElement tile = children.OfType<TileAsGumpElement>().Single();
+
+        Assert.Equal(3823, tile.ItemId);
+        Assert.Equal(2, tile.LinkId);
+        Assert.Equal(3, tile.ParamB);
+        Assert.Equal(4, tile.ParamC);
+
+        Assert.True(children.OfType<ImageElement>().Single().PartialHue);
+
+        ButtonElement button = children.OfType<ButtonElement>().Single();
+
+        Assert.Equal(3821, button.TileId);
+        Assert.Equal(33, button.TileHue);
+        Assert.Equal(4, button.TileX);
+        Assert.Equal(5, button.TileY);
+        Assert.Equal(0x40001234, button.ItemPropertySerial);
+
+        HtmlElement html = children.OfType<HtmlElement>().Single();
+
+        Assert.Equal(0x7FFF, html.Color);
+        Assert.Equal("Bob@42", html.Arguments);
+    }
+
+    /// <summary>
+    /// A label is only resizable once it is cropped, so the reader has to set
+    /// <c>Cropped</c> before it assigns the size. Reading them the other way round
+    /// silently discards the crop rectangle, because
+    /// <see cref="Element.Size"/> ignores writes to a non-resizable element.
+    /// </summary>
+    [Fact]
+    public void ACroppedLabelKeepsItsRectangle()
+    {
+        LabelElement label = new()
+        {
+            Text = "clip me",
+            Cropped = true,
+            Size = new GumpSize(90, 18),
+        };
+
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(label);
+
+        LabelElement reloaded = GumpXmlSerializer
+            .FromXml(GumpXmlSerializer.ToXml(document))
+            .Pages[0].Root.Children.OfType<LabelElement>().Single();
+
+        Assert.True(reloaded.Cropped);
+        Assert.Equal(new GumpSize(90, 18), reloaded.Size);
+    }
+
+    [Fact]
+    public void AnUncroppedLabelWritesNoRectangle()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new LabelElement { Text = "measure me" });
+
+        XElement node = GumpXmlSerializer.ToXml(document).Root!.Element("page")!.Element("label")!;
+
+        // Its extent comes from the rendered text, so persisting one would just
+        // go stale the next time the font or the string changed.
+        Assert.Null(node.Attribute("w"));
+        Assert.Null(node.Attribute("h"));
+    }
+
+    [Fact]
+    public void TooltipAttributesAreWrittenOnlyWhenSet()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new ImageElement { GumpId = 5 });
+
+        XElement plain = GumpXmlSerializer.ToXml(document).Root!.Element("page")!.Element("image")!;
+
+        Assert.Null(plain.Attribute("tooltip"));
+        Assert.Null(plain.Attribute("tooltipArgs"));
+        Assert.Null(plain.Attribute("itemProperty"));
     }
 
     [Fact]
@@ -177,14 +315,19 @@ public class GumpXmlSerializerTests
     [Fact]
     public void UnknownElementTypesAreSkippedNotFatal()
     {
-        XDocument xml = GumpXmlSerializer.ToXml(BuildSample());
+        GumpDocument original = BuildSample();
+        XDocument xml = GumpXmlSerializer.ToXml(original);
 
         xml.Root!.Elements("page").First().Add(new XElement("hologram", new XAttribute("x", 1)));
 
         GumpDocument reloaded = GumpXmlSerializer.FromXml(xml);
 
         // A file from a newer build must still open, minus what we cannot model.
-        Assert.Equal(12, reloaded.Pages[0].Root.Children.Count);
+        // Counted against the sample rather than a literal, so growing the sample
+        // does not break this.
+        Assert.Equal(
+            original.Pages[0].Root.Children.Count,
+            reloaded.Pages[0].Root.Children.Count);
     }
 
     [Fact]

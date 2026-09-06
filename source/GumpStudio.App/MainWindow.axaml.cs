@@ -87,6 +87,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuShowGrid", ApplyGridSettings);
         Click("MenuSnapToGrid", ApplyGridSettings);
         ClickAsync("MenuGridSize", ChooseGridSizeAsync);
+        ClickAsync("MenuGumpProperties", EditGumpPropertiesAsync);
         Click("MenuRemovePage", RemovePage);
 
         ClickAsync("MenuOpen", OpenAsync);
@@ -151,7 +152,9 @@ public sealed partial class MainWindow : Window, IDisposable
             ("Background", () => new BackgroundElement()),
             ("Image", () => new ImageElement()),
             ("Tiled", () => new TiledElement()),
+            ("Pic in pic", () => new PicInPicElement()),
             ("Item", () => new ItemElement()),
+            ("Item as pic", () => new TileAsGumpElement()),
             ("Label", () => new LabelElement()),
             ("Button", () => new ButtonElement()),
             ("Checkbox", () => new CheckboxElement()),
@@ -239,6 +242,23 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _canvas.InvalidateVisual();
         SetStatus($"Grid set to {size.Width} x {size.Height}.");
+    }
+
+    private async Task EditGumpPropertiesAsync()
+    {
+        GumpPropertiesWindow dialog = new(_session.Document.Properties);
+
+        await dialog.ShowDialog(this).ConfigureAwait(true);
+
+        if (dialog.Result is not { } properties)
+        {
+            return;
+        }
+
+        _session.History.Push(new SetGumpPropertiesCommand(_session.Document, properties));
+
+        RefreshAll();
+        SetStatus("Gump properties updated.");
     }
 
     private void SaveSettings()

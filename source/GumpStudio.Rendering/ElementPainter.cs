@@ -101,15 +101,58 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
     }
 
     public void Visit(ImageElement element) =>
-        DrawArt(art.GetGump(element.GumpId, element.Hue), element);
+        DrawArt(art.GetGump(element.GumpId, element.Hue, element.PartialHue), element);
 
     public void Visit(ItemElement element) =>
         DrawArt(art.GetItem(element.ItemId, element.Hue, partialHue: true), element);
 
-    public void Visit(ButtonElement element) =>
+    public void Visit(PicInPicElement element)
+    {
+        if (art.GetGump(element.GumpId, element.Hue, element.PartialHue) is not { } image)
+        {
+            DrawMissing(element.Bounds);
+
+            return;
+        }
+
+        // The source region is cut out by clipping to the element and drawing the
+        // whole image shifted back by the region's origin, which needs no
+        // intermediate surface and keeps the nearest-neighbour sampling.
+        int saved = canvas.Save();
+
+        canvas.ClipRect(ToRect(element.Bounds));
+        canvas.DrawImage(
+            image,
+            element.X - element.SourceX,
+            element.Y - element.SourceY,
+            PixelArt.Sampling);
+
+        canvas.RestoreToCount(saved);
+    }
+
+    public void Visit(TileAsGumpElement element) =>
+        DrawArt(art.GetItem(element.ItemId, hue: 0, partialHue: true), element);
+
+    public void Visit(ButtonElement element)
+    {
         DrawArt(
             art.GetGump(element.State == ButtonState.Pressed ? element.PressedId : element.NormalId),
             element);
+
+        if (element.TileId == 0
+            || art.GetItem(element.TileId, element.TileHue, partialHue: true) is not { } tile)
+        {
+            return;
+        }
+
+        // The overlay's offset is relative to the button's own origin, and it is
+        // not clipped to the button: oversized art deliberately spills out.
+        canvas.DrawImage(
+            tile,
+            element.X + element.TileX,
+            element.Y + element.TileY,
+            PixelArt.Sampling);
+    }
 
     public void Visit(CheckboxElement element) =>
         DrawArt(art.GetGump(element.IsChecked ? element.CheckedId : element.UncheckedId), element);

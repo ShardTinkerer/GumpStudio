@@ -31,6 +31,10 @@ public interface IElementVisitor
 
     void Visit(LabelElement element);
 
+    void Visit(PicInPicElement element);
+
+    void Visit(TileAsGumpElement element);
+
     void Visit(TextEntryElement element);
 
     void Visit(TiledElement element);

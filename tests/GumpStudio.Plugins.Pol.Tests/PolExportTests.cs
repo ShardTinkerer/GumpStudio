@@ -114,7 +114,9 @@ public class PolExportTests
         Assert.Contains("endprogram", script, StringComparison.Ordinal);
 
         // The gump package has no tiled call, so the original commented it out.
-        Assert.Contains("//Gump package does not support GumpPicTiled", script, StringComparison.Ordinal);
+        // The name in the note is taken from the command on the line below it, so
+        // it is lowercase where the original spelled it "GumpPicTiled".
+        Assert.Contains("//Gump package does not support gumppictiled", script, StringComparison.Ordinal);
         Assert.Contains("//gumppictiled 60 60 40 30 4", script, StringComparison.Ordinal);
     }
 
@@ -328,6 +330,354 @@ public class PolExportTests
             "GFCreateGump",
             exporter.Export(new GumpDocument(), new Core.Export.GumpExportOptions { GumpName = "Test" }),
             StringComparison.Ordinal);
+    }
+
+    private static string Layout(GumpDocument document) =>
+        PolScriptBuilder.Build(
+            document, "g", new PolExportOptions { Style = PolScriptStyle.LayoutStrings }, Stamp);
+
+    private static GumpDocument WithElement(Element element)
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(element);
+
+        return document;
+    }
+
+    /// <summary>
+    /// The slots are quit, page-id, return-value. The original got all three
+    /// wrong and its own source admits it, carrying a
+    /// <c>// TODO: Page or Reply???</c> comment: it inverted the quit flag, put a
+    /// page button's target page in the return-value slot, and a reply button's
+    /// return value in the page slot. The layout asserted here is what both the
+    /// POL command reference and the client's parser describe.
+    /// </summary>
+    [Fact]
+    public void APageButtonPutsItsPageInThePageSlotAndDoesNotQuit()
+    {
+        string script = Layout(WithElement(new ButtonElement
+        {
+            Location = GumpPoint.Origin,
+            NormalId = 1,
+            PressedId = 2,
+            Kind = ButtonKind.Page,
+            Param = 3,
+        }));
+
+        Assert.Contains("\"button 0 0 1 2 0 3 0\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReplyButtonPutsItsValueInTheReturnSlotAndQuits()
+    {
+        string script = Layout(WithElement(new ButtonElement
+        {
+            Location = GumpPoint.Origin,
+            NormalId = 1,
+            PressedId = 2,
+            Kind = ButtonKind.Reply,
+            Param = 3,
+        }));
+
+        Assert.Contains("\"button 0 0 1 2 1 0 3\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ButtonTileArtAppendsTheOverlayParameters()
+    {
+        string script = Layout(WithElement(new ButtonElement
+        {
+            Location = GumpPoint.Origin,
+            NormalId = 1,
+            PressedId = 2,
+            Kind = ButtonKind.Reply,
+            Param = 3,
+            TileId = 3821,
+            TileHue = 33,
+            TileX = 4,
+            TileY = 5,
+        }));
+
+        Assert.Contains("\"buttontileart 0 0 1 2 1 0 3 3821 33 4 5\"", script, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, false, "gumppic 0 0 55")]
+    [InlineData(33, false, "gumppic 0 0 55 33")]
+    [InlineData(33, true, "gumppicphued 0 0 55 33")]
+    public void AGumpImagePicksTheCommandThatMatchesItsHueMode(int hue, bool partial, string expected)
+    {
+        string script = Layout(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            Hue = hue,
+            PartialHue = partial,
+        }));
+
+        Assert.Contains($"\"{expected}\"", script, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0, false, "picinpic 0 0 9000 4 5 20 30")]
+    [InlineData(7, false, "picinpichued 0 0 9000 4 5 20 30 7")]
+    [InlineData(7, true, "picinpicphued 0 0 9000 4 5 20 30 7")]
+    public void APicInPicPicksTheCommandThatMatchesItsHueMode(int hue, bool partial, string expected)
+    {
+        string script = Layout(WithElement(new PicInPicElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(20, 30),
+            GumpId = 9000,
+            SourceX = 4,
+            SourceY = 5,
+            Hue = hue,
+            PartialHue = partial,
+        }));
+
+        Assert.Contains($"\"{expected}\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TileArtInAGumpSlotCarriesItsThreeTrailingParameters()
+    {
+        string script = Layout(WithElement(new TileAsGumpElement
+        {
+            Location = GumpPoint.Origin,
+            ItemId = 3821,
+            LinkId = 1,
+            ParamB = 2,
+            ParamC = 3,
+        }));
+
+        Assert.Contains("\"tilepicasgumppic 0 0 3821 1 2 3\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATextEntryWithALimitUsesTheLimitedCommand()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new TextEntryElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(120, 20),
+            EntryId = 2,
+            MaxLength = 40,
+        });
+
+        string script = Layout(document);
+
+        Assert.Contains("\"textentrylimited 0 0 120 20 0 2 0 40\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"textentry 0 0", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUnlimitedTextEntryStillUsesThePlainCommand()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new TextEntryElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(120, 20),
+            EntryId = 2,
+        });
+
+        Assert.Contains("\"textentry 0 0 120 20 0 2 0\"", Layout(document), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACroppedLabelUsesCroppedText()
+    {
+        string script = Layout(WithElement(new LabelElement
+        {
+            Location = GumpPoint.Origin,
+            Text = "clip",
+            Hue = 5,
+            Cropped = true,
+            Size = new GumpSize(90, 18),
+        }));
+
+        Assert.Contains("\"croppedtext 0 0 90 18 5 0\"", script, StringComparison.Ordinal);
+        Assert.Contains("\"clip\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ALocalizedHtmlAreaWithAColourUsesTheColourCommand()
+    {
+        string script = Layout(WithElement(new HtmlElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(200, 60),
+            ContentKind = HtmlContentKind.Localized,
+            ClilocId = 1049004,
+            ShowBackground = true,
+            Color = 32767,
+        }));
+
+        Assert.Contains(
+            "\"xmfhtmlgumpcolor 0 0 200 60 1049004 1 0 32767\"", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>xmfhtmltok</c> is not <c>xmfhtmlgumpcolor</c> with arguments appended:
+    /// the flags come before the colour and the cliloc id comes last.
+    /// </summary>
+    [Fact]
+    public void ALocalizedHtmlAreaWithArgumentsUsesTokAndItsOwnParameterOrder()
+    {
+        string script = Layout(WithElement(new HtmlElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(200, 60),
+            ContentKind = HtmlContentKind.Localized,
+            ClilocId = 1049004,
+            ShowBackground = true,
+            ShowScrollbar = true,
+            Color = 32767,
+            Arguments = "Bob@42",
+        }));
+
+        Assert.Contains(
+            "\"xmfhtmltok 0 0 200 60 1 1 32767 1049004 @Bob@42@\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APlainLocalizedHtmlAreaStillUsesXmfHtmlGump()
+    {
+        string script = Layout(WithElement(new HtmlElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(200, 60),
+            ContentKind = HtmlContentKind.Localized,
+            ClilocId = 1049004,
+        }));
+
+        Assert.Contains("\"xmfhtmlgump 0 0 200 60 1049004 0 0\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TooltipsFollowTheElementTheyAttachTo()
+    {
+        string script = Layout(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            TooltipClilocId = 1042971,
+            TooltipArguments = "Bob@42",
+        }));
+
+        int image = script.IndexOf("gumppic 0 0 55", StringComparison.Ordinal);
+        int tooltip = script.IndexOf("tooltip 1042971 @Bob@42@", StringComparison.Ordinal);
+
+        // The client attaches a tooltip to whichever element it created last, so
+        // order is the whole meaning of the command.
+        Assert.True(image >= 0 && tooltip > image, script);
+    }
+
+    [Fact]
+    public void AnItemPropertyTooltipEmitsItsSerial()
+    {
+        string script = Layout(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            ItemPropertySerial = 1073741825,
+        }));
+
+        Assert.Contains("\"itemproperty 1073741825\"", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GumpLevelTokensAreEmittedOnlyWhenSet()
+    {
+        GumpDocument document = new();
+
+        string off = Layout(document);
+
+        Assert.DoesNotContain("mastergump", off, StringComparison.Ordinal);
+        Assert.DoesNotContain("toggleupperwordcase", off, StringComparison.Ordinal);
+        Assert.DoesNotContain("togglecroppedtext", off, StringComparison.Ordinal);
+        Assert.DoesNotContain("echandleinput", off, StringComparison.Ordinal);
+
+        document.Properties.MasterGumpId = 3000;
+        document.Properties.UpperWordCase = true;
+        document.Properties.CroppedText = true;
+        document.Properties.EnhancedClientInput = true;
+
+        string on = Layout(document);
+
+        Assert.Contains("\"mastergump 3000\"", on, StringComparison.Ordinal);
+        Assert.Contains("\"toggleupperwordcase\"", on, StringComparison.Ordinal);
+        Assert.Contains("\"togglecroppedtext\"", on, StringComparison.Ordinal);
+        Assert.Contains("\"echandleinput\"", on, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ARadioGroupIsClosedBeforeThePageEnds()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 3, Value = 1 });
+
+        string script = Layout(document);
+
+        int group = script.IndexOf("\"group 3\"", StringComparison.Ordinal);
+        int end = script.IndexOf("\"endgroup\"", StringComparison.Ordinal);
+
+        Assert.True(group >= 0 && end > group, script);
+    }
+
+    [Fact]
+    public void NoGroupMeansNoEndGroup()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 0, Value = 1 });
+
+        Assert.DoesNotContain("endgroup", Layout(document), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The client's <c>page</c> command resets the current group, so the same
+    /// group id on a later page has to be declared again. Tracking the group
+    /// across pages meant the exporter skipped the declaration and every radio on
+    /// the second page silently fell into group 0.
+    /// </summary>
+    [Fact]
+    public void TheSameGroupIdOnTheNextPageIsDeclaredAgain()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 3, Value = 1 });
+        document.AddPage().Root.Add(new RadioElement { GroupId = 3, Value = 2 });
+
+        string script = Layout(document);
+        int occurrences = script.Split("\"group 3\"").Length - 1;
+
+        Assert.Equal(2, occurrences);
+    }
+
+    [Fact]
+    public void TheGumpPackageCommentsOutWhatItHasNoFunctionFor()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new PicInPicElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(20, 30),
+            GumpId = 9000,
+            SourceX = 4,
+            SourceY = 5,
+        });
+
+        string script = PolScriptBuilder.Build(document, "g", null, Stamp);
+
+        Assert.Contains("//Gump package does not support picinpic", script, StringComparison.Ordinal);
+        Assert.Contains("//picinpic 0 0 9000 4 5 20 30", script, StringComparison.Ordinal);
     }
 
     private sealed class RecordingHost : IPluginHost

@@ -41,6 +41,10 @@
         <MenuItem Header="Grid _size…" Name="MenuGridSize" />
       </MenuItem>
 
+      <MenuItem Header="_Gump">
+        <MenuItem Header="_Properties…" Name="MenuGumpProperties" />
+      </MenuItem>
+
       <MenuItem Header="_Page">
         <MenuItem Header="_Add page" Name="MenuAddPage" />
         <MenuItem Header="_Remove page" Name="MenuRemovePage" />

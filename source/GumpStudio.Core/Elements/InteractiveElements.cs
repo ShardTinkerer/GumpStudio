@@ -26,6 +26,10 @@ public sealed class ButtonElement : Element
     private ButtonState _state = ButtonState.Normal;
     private int _param;
     private string _codeBehind = string.Empty;
+    private int _tileId;
+    private int _tileHue;
+    private int _tileX;
+    private int _tileY;
 
     public override string TypeName => "Button";
 
@@ -68,6 +72,41 @@ public sealed class ButtonElement : Element
         set => Set(ref _codeBehind, value ?? string.Empty);
     }
 
+    /// <summary>
+    /// World-item art overlaid on the button, or 0 for a plain button.
+    /// </summary>
+    /// <remarks>
+    /// Setting this makes the button export as the client's
+    /// <c>buttontileart</c> rather than <c>button</c>. Shard UIs use it for
+    /// "buy this item" style buttons, where the item itself is the label.
+    /// </remarks>
+    public int TileId
+    {
+        get => _tileId;
+        set => Set(ref _tileId, value);
+    }
+
+    /// <summary>One-based hue for <see cref="TileId"/>, or 0 for none.</summary>
+    public int TileHue
+    {
+        get => _tileHue;
+        set => Set(ref _tileHue, value);
+    }
+
+    /// <summary>Overlay offset from the button's own origin.</summary>
+    public int TileX
+    {
+        get => _tileX;
+        set => Set(ref _tileX, value);
+    }
+
+    /// <summary>Overlay offset from the button's own origin.</summary>
+    public int TileY
+    {
+        get => _tileY;
+        set => Set(ref _tileY, value);
+    }
+
     protected override void CopyTo(Element target)
     {
         ButtonElement clone = (ButtonElement)target;
@@ -78,6 +117,10 @@ public sealed class ButtonElement : Element
         clone._state = _state;
         clone._param = _param;
         clone._codeBehind = _codeBehind;
+        clone._tileId = _tileId;
+        clone._tileHue = _tileHue;
+        clone._tileX = _tileX;
+        clone._tileY = _tileY;
     }
 
     protected override Element CreateInstance() => new ButtonElement();

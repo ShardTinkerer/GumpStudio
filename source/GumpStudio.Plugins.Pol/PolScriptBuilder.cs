@@ -53,7 +53,7 @@ public sealed record PolExportOptions
 /// <remarks>
 /// <para>
 /// Ported from the 1.8 POL exporter, preserving both dialects it emitted, with
-/// three corrections:
+/// four corrections:
 /// </para>
 /// <list type="bullet">
 /// <item>
@@ -70,7 +70,20 @@ public sealed record PolExportOptions
 /// All numbers format with the invariant culture, so output does not change with
 /// the machine's locale.
 /// </item>
+/// <item>
+/// The <c>button</c> layout command puts its values in the right slots. See
+/// <see cref="LayoutButton"/>.
+/// </item>
 /// </list>
+/// <para>
+/// The layout-string dialect also emits the commands the client gained after 1.8
+/// was written: <c>picinpic</c>, <c>buttontileart</c>, <c>textentrylimited</c>,
+/// <c>croppedtext</c>, <c>xmfhtmlgumpcolor</c>, <c>xmfhtmltok</c>,
+/// <c>tooltip</c>, <c>itemproperty</c>, <c>mastergump</c> and friends. The gump
+/// package has no function for most of those, so there they are emitted
+/// commented out beside the call that comes closest — the same thing the
+/// original did for <c>gumppictiled</c>.
+/// </para>
 /// </remarks>
 public sealed class PolScriptBuilder
 {
@@ -147,10 +160,20 @@ public sealed class PolScriptBuilder
             body.Add($"GFDisposable({name}, 0);");
         }
 
-        int radioGroup = -1;
+        foreach (string token in GumpLevelTokens(document.Properties))
+        {
+            Unsupported(body, token);
+        }
 
         for (int page = 0; page < document.PageCount; page++)
         {
+            // The gump package's radio group is per-gump state, exactly as the
+            // client's is, and switching page resets it — so the tracker resets
+            // too. Carrying it across pages made the exporter skip the group
+            // call for a page whose first radio happened to match the last group
+            // used on the previous page.
+            int radioGroup = -1;
+
             if (page > 0)
             {
                 body.Add(string.Empty);
@@ -161,76 +184,8 @@ public sealed class PolScriptBuilder
             foreach (Element element in document.Pages[page].Leaves())
             {
                 AppendComment(body, element, options);
-
-                GumpPoint at = element.GetAbsolutePosition();
-
-                switch (element)
-                {
-                    case HtmlElement html when html.ContentKind == HtmlContentKind.Html:
-                        body.Add(GfHtmlArea(name, html, at, options));
-                        break;
-
-                    case HtmlElement html:
-                        body.Add(GfHtmlLocalized(name, html, at));
-                        break;
-
-                    case TextEntryElement entry:
-                        body.Add(GfTextEntry(name, entry, at, options));
-                        break;
-
-                    case LabelElement label:
-                        body.Add(GfTextLine(name, label, at, options));
-                        break;
-
-                    case AlphaElement alpha:
-                        body.Add(Invariant(
-                            $"GFAddAlphaRegion({name}, {at.X}, {at.Y}, {alpha.Width}, {alpha.Height});"));
-                        break;
-
-                    case BackgroundElement background:
-                        body.Add(Concat(Invariant($"GFResizePic({name}, {at.X}, {at.Y}, {background.GumpId}, "), Invariant($"{background.Width}, {background.Height});")));
-                        break;
-
-                    case ImageElement image:
-                        body.Add(Invariant(
-                            $"GFGumpPic({name}, {at.X}, {at.Y}, {image.GumpId}, {image.Hue});"));
-                        break;
-
-                    case ItemElement item:
-                        body.Add(Invariant(
-                            $"GFTilePic({name}, {at.X}, {at.Y}, {item.ItemId}, {item.Hue});"));
-                        break;
-
-                    case TiledElement tiled:
-                        // The gump package has no tiled-image call, so the original
-                        // emitted the layout-string form commented out. Preserved.
-                        body.Add(string.Empty);
-                        body.Add("//Gump package does not support GumpPicTiled");
-                        body.Add("//" + LayoutGumpPicTiled(tiled, at));
-                        body.Add(string.Empty);
-                        break;
-
-                    case ButtonElement button:
-                        body.Add(Concat(Invariant($"GFAddButton({name}, {at.X}, {at.Y}, {button.NormalId}, {button.PressedId}, "), Invariant($"{(button.Kind == ButtonKind.Page ? "GF_PAGE_BTN" : "GF_CLOSE_BTN")}, "), Invariant($"{button.Param});")));
-                        break;
-
-                    case RadioElement radio:
-                        if (radio.GroupId != radioGroup)
-                        {
-                            body.Add(Invariant($"GFSetRadioGroup({name}, {radio.GroupId});"));
-                            radioGroup = radio.GroupId;
-                        }
-
-                        body.Add(Concat(Invariant($"GFRadioButton({name}, {at.X}, {at.Y}, {radio.UncheckedId}, {radio.CheckedId}, "), Invariant($"{Flag(radio.IsChecked)}, {radio.Value});")));
-                        break;
-
-                    case CheckboxElement checkbox:
-                        body.Add(Concat(Invariant($"GFCheckBox({name}, {at.X}, {at.Y}, {checkbox.UncheckedId}, {checkbox.CheckedId}, "), Invariant($"{Flag(checkbox.IsChecked)}, {checkbox.GroupId});")));
-                        break;
-
-                    default:
-                        break;
-                }
+                AppendGumpPackageElement(body, name, element, options, ref radioGroup);
+                AppendTooltip(body, element, Unsupported);
             }
         }
 
@@ -258,6 +213,121 @@ public sealed class PolScriptBuilder
         return script.ToString();
     }
 
+    private static void AppendGumpPackageElement(
+        List<string> body, string name, Element element, PolExportOptions options, ref int radioGroup)
+    {
+        GumpPoint at = element.GetAbsolutePosition();
+
+        switch (element)
+        {
+            case HtmlElement html when html.ContentKind == HtmlContentKind.Html:
+                body.Add(GfHtmlArea(name, html, at, options));
+                break;
+
+            case HtmlElement html:
+                body.Add(GfHtmlLocalized(name, html, at));
+
+                // GFAddHTMLLocalized takes neither a colour nor cliloc arguments.
+                if (html.Color != 0 || html.Arguments.Length > 0)
+                {
+                    Unsupported(body, LayoutLocalizedHtml(html, at));
+                }
+
+                break;
+
+            case TextEntryElement entry:
+                body.Add(GfTextEntry(name, entry, at, options));
+
+                if (entry.MaxLength > 0)
+                {
+                    Unsupported(body, LayoutTextEntry(entry, at, textIndex: 0));
+                }
+
+                break;
+
+            case LabelElement label:
+                body.Add(GfTextLine(name, label, at, options));
+
+                // GFTextLine has no crop rectangle.
+                if (label.Cropped)
+                {
+                    Unsupported(body, LayoutCroppedText(label, at, textIndex: 0));
+                }
+
+                break;
+
+            case AlphaElement alpha:
+                body.Add(Invariant(
+                    $"GFAddAlphaRegion({name}, {at.X}, {at.Y}, {alpha.Width}, {alpha.Height});"));
+                break;
+
+            case BackgroundElement background:
+                body.Add(Concat(Invariant($"GFResizePic({name}, {at.X}, {at.Y}, {background.GumpId}, "), Invariant($"{background.Width}, {background.Height});")));
+                break;
+
+            case ImageElement image:
+                body.Add(Invariant(
+                    $"GFGumpPic({name}, {at.X}, {at.Y}, {image.GumpId}, {image.Hue});"));
+
+                // GFGumpPic always applies a full tint.
+                if (image.PartialHue && image.Hue != 0)
+                {
+                    Unsupported(body, LayoutGumpPic(image, at));
+                }
+
+                break;
+
+            case PicInPicElement pic:
+                Unsupported(body, LayoutPicInPic(pic, at));
+                break;
+
+            case TileAsGumpElement tile:
+                Unsupported(body, LayoutTileAsGump(tile, at));
+                break;
+
+            case ItemElement item:
+                body.Add(Invariant(
+                    $"GFTilePic({name}, {at.X}, {at.Y}, {item.ItemId}, {item.Hue});"));
+                break;
+
+            case TiledElement tiled:
+                Unsupported(body, LayoutGumpPicTiled(tiled, at));
+                break;
+
+            case ButtonElement button:
+                body.Add(Concat(Invariant($"GFAddButton({name}, {at.X}, {at.Y}, {button.NormalId}, {button.PressedId}, "), Invariant($"{(button.Kind == ButtonKind.Page ? "GF_PAGE_BTN" : "GF_CLOSE_BTN")}, "), Invariant($"{button.Param});")));
+
+                if (button.TileId != 0)
+                {
+                    Unsupported(body, LayoutButton(button, at));
+                }
+
+                break;
+
+            case RadioElement radio:
+                if (radio.GroupId != radioGroup)
+                {
+                    body.Add(Invariant($"GFSetRadioGroup({name}, {radio.GroupId});"));
+                    radioGroup = radio.GroupId;
+                }
+
+                body.Add(Concat(Invariant($"GFRadioButton({name}, {at.X}, {at.Y}, {radio.UncheckedId}, {radio.CheckedId}, "), Invariant($"{Flag(radio.IsChecked)}, {radio.Value});")));
+                break;
+
+            case CheckboxElement checkbox:
+                body.Add(Concat(Invariant($"GFCheckBox({name}, {at.X}, {at.Y}, {checkbox.UncheckedId}, {checkbox.CheckedId}, "), Invariant($"{Flag(checkbox.IsChecked)}, {checkbox.GroupId});")));
+                break;
+
+            case GroupElement:
+                // Leaves() never yields one; groups are an editor construct.
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"No POL gump-package output for element type '{element.TypeName}'.");
+        }
+    }
+
     private static string BuildLayoutStrings(
         GumpDocument document, string name, PolExportOptions options, DateTimeOffset? timestamp)
     {
@@ -279,80 +349,27 @@ public sealed class PolScriptBuilder
             layout.Add("NoDispose");
         }
 
-        int radioGroup = -1;
+        layout.AddRange(GumpLevelTokens(document.Properties));
 
         for (int page = 0; page < document.PageCount; page++)
         {
+            // `page` resets the client's current group, so the tracker resets with
+            // it. See the matching comment in the gump-package path.
+            int radioGroup = -1;
+
             layout.Add(Invariant($"page {page}"));
 
             foreach (Element element in document.Pages[page].Leaves())
             {
-                GumpPoint at = element.GetAbsolutePosition();
+                AppendLayoutElement(layout, texts, element, options, ref radioGroup);
+                AppendTooltip(layout, element, static (list, line) => list.Add(line));
+            }
 
-                switch (element)
-                {
-                    case HtmlElement html when html.ContentKind == HtmlContentKind.Html:
-                        layout.Add(Concat(Invariant($"htmlgump {at.X} {at.Y} {html.Width} {html.Height} "), Invariant($"{AddText(texts, html.Html, "HtmlGump", options)} "), Invariant($"{Flag(html.ShowBackground)} {Flag(html.ShowScrollbar)}")));
-                        break;
-
-                    case HtmlElement html:
-                        layout.Add(Concat(Invariant($"xmfhtmlgump {at.X} {at.Y} {html.Width} {html.Height} {html.ClilocId} "), Invariant($"{Flag(html.ShowBackground)} {Flag(html.ShowScrollbar)}")));
-                        break;
-
-                    case TextEntryElement entry:
-                        layout.Add(Concat(Invariant($"textentry {at.X} {at.Y} {entry.Width} {entry.Height} {entry.Hue} "), Invariant($"{entry.EntryId} {AddText(texts, entry.InitialText, "TextEntry", options)}")));
-                        break;
-
-                    case LabelElement label:
-                        layout.Add(Concat(Invariant($"text {at.X} {at.Y} {label.Hue} "), Invariant($"{AddText(texts, label.Text, "Text", options)}")));
-                        break;
-
-                    case AlphaElement alpha:
-                        layout.Add(Invariant(
-                            $"checkertrans {at.X} {at.Y} {alpha.Width} {alpha.Height}"));
-                        break;
-
-                    case BackgroundElement background:
-                        layout.Add(Concat(Invariant($"resizepic {at.X} {at.Y} {background.GumpId} "), Invariant($"{background.Width} {background.Height}")));
-                        break;
-
-                    case ImageElement image:
-                        layout.Add(image.Hue != 0
-                            ? Invariant($"gumppic {at.X} {at.Y} {image.GumpId} {image.Hue}")
-                            : Invariant($"gumppic {at.X} {at.Y} {image.GumpId}"));
-                        break;
-
-                    case ItemElement item:
-                        layout.Add(item.Hue != 0
-                            ? Invariant($"tilepichue {at.X} {at.Y} {item.ItemId} {item.Hue}")
-                            : Invariant($"tilepic {at.X} {at.Y} {item.ItemId}"));
-                        break;
-
-                    case TiledElement tiled:
-                        layout.Add(LayoutGumpPicTiled(tiled, at));
-                        break;
-
-                    case ButtonElement button:
-                        layout.Add(LayoutButton(button, at));
-                        break;
-
-                    case RadioElement radio:
-                        if (radio.GroupId != radioGroup)
-                        {
-                            layout.Add(Invariant($"group {radio.GroupId}"));
-                            radioGroup = radio.GroupId;
-                        }
-
-                        layout.Add(Concat(Invariant($"radio {at.X} {at.Y} {radio.UncheckedId} {radio.CheckedId} "), Invariant($"{Flag(radio.IsChecked)} {radio.Value}")));
-                        break;
-
-                    case CheckboxElement checkbox:
-                        layout.Add(Concat(Invariant($"checkbox {at.X} {at.Y} {checkbox.UncheckedId} {checkbox.CheckedId} "), Invariant($"{Flag(checkbox.IsChecked)} {checkbox.GroupId}")));
-                        break;
-
-                    default:
-                        break;
-                }
+            if (radioGroup > 0)
+            {
+                // Without this every radio placed after the last group on the page
+                // would silently join it.
+                layout.Add("endgroup");
             }
         }
 
@@ -380,6 +397,153 @@ public sealed class PolScriptBuilder
         script.AppendLine("endprogram");
 
         return script.ToString();
+    }
+
+    private static void AppendLayoutElement(
+        List<string> layout,
+        List<string> texts,
+        Element element,
+        PolExportOptions options,
+        ref int radioGroup)
+    {
+        GumpPoint at = element.GetAbsolutePosition();
+
+        switch (element)
+        {
+            case HtmlElement html when html.ContentKind == HtmlContentKind.Html:
+                layout.Add(Concat(Invariant($"htmlgump {at.X} {at.Y} {html.Width} {html.Height} "), Invariant($"{AddText(texts, html.Html, "HtmlGump", options)} "), Invariant($"{Flag(html.ShowBackground)} {Flag(html.ShowScrollbar)}")));
+                break;
+
+            case HtmlElement html:
+                layout.Add(LayoutLocalizedHtml(html, at));
+                break;
+
+            case TextEntryElement entry:
+                layout.Add(LayoutTextEntry(
+                    entry, at, AddText(texts, entry.InitialText, "TextEntry", options)));
+                break;
+
+            case LabelElement label:
+                layout.Add(label.Cropped
+                    ? LayoutCroppedText(label, at, AddText(texts, label.Text, "Text", options))
+                    : Concat(Invariant($"text {at.X} {at.Y} {label.Hue} "), Invariant($"{AddText(texts, label.Text, "Text", options)}")));
+                break;
+
+            case AlphaElement alpha:
+                layout.Add(Invariant(
+                    $"checkertrans {at.X} {at.Y} {alpha.Width} {alpha.Height}"));
+                break;
+
+            case BackgroundElement background:
+                layout.Add(Concat(Invariant($"resizepic {at.X} {at.Y} {background.GumpId} "), Invariant($"{background.Width} {background.Height}")));
+                break;
+
+            case ImageElement image:
+                layout.Add(LayoutGumpPic(image, at));
+                break;
+
+            case PicInPicElement pic:
+                layout.Add(LayoutPicInPic(pic, at));
+                break;
+
+            case TileAsGumpElement tile:
+                layout.Add(LayoutTileAsGump(tile, at));
+                break;
+
+            case ItemElement item:
+                layout.Add(item.Hue != 0
+                    ? Invariant($"tilepichue {at.X} {at.Y} {item.ItemId} {item.Hue}")
+                    : Invariant($"tilepic {at.X} {at.Y} {item.ItemId}"));
+                break;
+
+            case TiledElement tiled:
+                layout.Add(LayoutGumpPicTiled(tiled, at));
+                break;
+
+            case ButtonElement button:
+                layout.Add(LayoutButton(button, at));
+                break;
+
+            case RadioElement radio:
+                if (radio.GroupId != radioGroup)
+                {
+                    layout.Add(Invariant($"group {radio.GroupId}"));
+                    radioGroup = radio.GroupId;
+                }
+
+                layout.Add(Concat(Invariant($"radio {at.X} {at.Y} {radio.UncheckedId} {radio.CheckedId} "), Invariant($"{Flag(radio.IsChecked)} {radio.Value}")));
+                break;
+
+            case CheckboxElement checkbox:
+                layout.Add(Concat(Invariant($"checkbox {at.X} {at.Y} {checkbox.UncheckedId} {checkbox.CheckedId} "), Invariant($"{Flag(checkbox.IsChecked)} {checkbox.GroupId}")));
+                break;
+
+            case GroupElement:
+                break;
+
+            default:
+                throw new NotSupportedException(
+                    $"No POL layout-string output for element type '{element.TypeName}'.");
+        }
+    }
+
+    /// <summary>The commands set by gump-level flags rather than by an element.</summary>
+    private static IEnumerable<string> GumpLevelTokens(GumpProperties properties)
+    {
+        if (properties.MasterGumpId != 0)
+        {
+            yield return Invariant($"mastergump {properties.MasterGumpId}");
+        }
+
+        // These three are parser toggles: emitting one flips it for the rest of
+        // the definition, which is why they carry no argument and appear once.
+        if (properties.UpperWordCase)
+        {
+            yield return "toggleupperwordcase";
+        }
+
+        if (properties.CroppedText)
+        {
+            yield return "togglecroppedtext";
+        }
+
+        if (properties.EnhancedClientInput)
+        {
+            yield return "echandleinput";
+        }
+    }
+
+    /// <summary>
+    /// Emits the tooltip commands attached to an element.
+    /// </summary>
+    /// <remarks>
+    /// Both attach to whichever element the client created last, so they must
+    /// follow their element's own command immediately.
+    /// </remarks>
+    private static void AppendTooltip(List<string> lines, Element element, Action<List<string>, string> add)
+    {
+        if (element.TooltipClilocId != 0)
+        {
+            add(lines, element.TooltipArguments.Length > 0
+                ? Invariant($"tooltip {element.TooltipClilocId} @{element.TooltipArguments}@")
+                : Invariant($"tooltip {element.TooltipClilocId}"));
+        }
+
+        if (element.ItemPropertySerial != 0)
+        {
+            add(lines, Invariant($"itemproperty {element.ItemPropertySerial}"));
+        }
+    }
+
+    /// <summary>Records a layout command the gump package has no function for.</summary>
+    private static void Unsupported(List<string> body, string layoutCommand)
+    {
+        string command = layoutCommand.Split(' ', 2)[0];
+
+        body.Add(string.Empty);
+        body.Add(Invariant($"//Gump package does not support {command}"));
+        body.Add("//" + layoutCommand);
+        body.Add(string.Empty);
     }
 
     private static void AppendArray(StringBuilder script, string name, List<string> values)
@@ -443,16 +607,103 @@ public sealed class PolScriptBuilder
     private static string LayoutGumpPicTiled(TiledElement tiled, GumpPoint at) =>
         Invariant($"gumppictiled {at.X} {at.Y} {tiled.Width} {tiled.Height} {tiled.GumpId}");
 
+    /// <summary>
+    /// A gump image, hued fully, hued partially, or plain.
+    /// </summary>
+    /// <remarks>
+    /// <c>gumppicphued</c> tints only the grayscale pixels, which is what dyeable
+    /// art needs; <c>gumppichued</c> flattens everything to the hue.
+    /// </remarks>
+    private static string LayoutGumpPic(ImageElement image, GumpPoint at) => image switch
+    {
+        { Hue: 0 } => Invariant($"gumppic {at.X} {at.Y} {image.GumpId}"),
+        { PartialHue: true } => Invariant($"gumppicphued {at.X} {at.Y} {image.GumpId} {image.Hue}"),
+        _ => Invariant($"gumppic {at.X} {at.Y} {image.GumpId} {image.Hue}"),
+    };
+
+    private static string LayoutPicInPic(PicInPicElement pic, GumpPoint at)
+    {
+        string command = pic switch
+        {
+            { Hue: 0 } => "picinpic",
+            { PartialHue: true } => "picinpicphued",
+            _ => "picinpichued",
+        };
+
+        string region = Invariant($"{at.X} {at.Y} {pic.GumpId} {pic.SourceX} {pic.SourceY} {pic.Width} {pic.Height}");
+
+        return pic.Hue == 0 ? $"{command} {region}" : Concat($"{command} {region}", Invariant($" {pic.Hue}"));
+    }
+
+    private static string LayoutTileAsGump(TileAsGumpElement tile, GumpPoint at) =>
+        Invariant($"tilepicasgumppic {at.X} {at.Y} {tile.ItemId} {tile.LinkId} {tile.ParamB} {tile.ParamC}");
+
+    private static string LayoutCroppedText(LabelElement label, GumpPoint at, int textIndex) =>
+        Concat(Invariant($"croppedtext {at.X} {at.Y} {label.Width} {label.Height} "), Invariant($"{label.Hue} {textIndex}"));
+
+    private static string LayoutTextEntry(TextEntryElement entry, GumpPoint at, int textIndex) =>
+        entry.MaxLength > 0
+            ? Concat(Invariant($"textentrylimited {at.X} {at.Y} {entry.Width} {entry.Height} {entry.Hue} "), Invariant($"{entry.EntryId} {textIndex} {entry.MaxLength}"))
+            : Concat(Invariant($"textentry {at.X} {at.Y} {entry.Width} {entry.Height} {entry.Hue} "), Invariant($"{entry.EntryId} {textIndex}"));
+
+    /// <summary>
+    /// A localised HTML area, in whichever of its three forms the settings ask for.
+    /// </summary>
+    /// <remarks>
+    /// <c>xmfhtmltok</c> is not <c>xmfhtmlgumpcolor</c> with arguments bolted on:
+    /// its background and scrollbar flags come <em>before</em> the colour and its
+    /// cliloc id comes last.
+    /// </remarks>
+    private static string LayoutLocalizedHtml(HtmlElement html, GumpPoint at)
+    {
+        string rect = Invariant($"{at.X} {at.Y} {html.Width} {html.Height}");
+        string flags = Invariant($"{Flag(html.ShowBackground)} {Flag(html.ShowScrollbar)}");
+
+        if (html.Arguments.Length > 0)
+        {
+            return Concat(
+                $"xmfhtmltok {rect} {flags} ",
+                Invariant($"{html.Color} {html.ClilocId} @{html.Arguments}@"));
+        }
+
+        return html.Color != 0
+            ? Concat(Invariant($"xmfhtmlgumpcolor {rect} {html.ClilocId} {flags} "), Invariant($"{html.Color}"))
+            : Invariant($"xmfhtmlgump {rect} {html.ClilocId} {flags}");
+    }
+
+    /// <summary>
+    /// A button, or a button with tile art overlaid on it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The slots are <c>quit</c>, <c>page-id</c>, <c>return-value</c>. The
+    /// original got all three wrong and its source says so: the field carries a
+    /// <c>// TODO: Page or Reply???</c> comment. It emitted <c>quit</c> inverted,
+    /// put a page button's target page in the return-value slot, and a reply
+    /// button's return value in the page slot — so a page button closed the gump
+    /// and a reply button jumped to a page numbered after its reply id.
+    /// </para>
+    /// <para>
+    /// The layout here is what both the POL command reference and the client's
+    /// own parser describe, and it matches what RunUO emits.
+    /// </para>
+    /// </remarks>
     private static string LayoutButton(ButtonElement button, GumpPoint at)
     {
-        // A page button carries its target in the page slot; a reply button
-        // carries its id in the reply slot and leaves the page slot at zero.
         bool isPage = button.Kind == ButtonKind.Page;
 
-        int pageSlot = isPage ? button.Param : 0;
-        int replySlot = isPage ? 0 : button.Param;
+        int quit = isPage ? 0 : 1;
+        int pageId = isPage ? button.Param : 0;
+        int returnValue = isPage ? 0 : button.Param;
 
-        return Concat(Invariant($"button {at.X} {at.Y} {button.NormalId} {button.PressedId} "), Invariant($"{Flag(isPage)} {replySlot} {pageSlot}"));
+        string command = button.TileId != 0 ? "buttontileart" : "button";
+        string line = Concat(
+            Invariant($"{command} {at.X} {at.Y} {button.NormalId} {button.PressedId} "),
+            Invariant($"{quit} {pageId} {returnValue}"));
+
+        return button.TileId != 0
+            ? Concat(line, Invariant($" {button.TileId} {button.TileHue} {button.TileX} {button.TileY}"))
+            : line;
     }
 
     private static string GfTextLine(

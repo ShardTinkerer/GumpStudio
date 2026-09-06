@@ -27,6 +27,9 @@ public abstract class Element : INotifyPropertyChanged
     private string _comment = string.Empty;
     private GumpPoint _location;
     private GumpSize _size;
+    private int _tooltipClilocId;
+    private string _tooltipArguments = string.Empty;
+    private int _itemPropertySerial;
 
     protected Element()
     {
@@ -78,6 +81,49 @@ public abstract class Element : INotifyPropertyChanged
                 Set(ref _size, value);
             }
         }
+    }
+
+    /// <summary>
+    /// A cliloc tooltip shown on hover, or 0 for none.
+    /// </summary>
+    /// <remarks>
+    /// The client's <c>tooltip</c> command attaches to whichever element was
+    /// created last, which makes it positional in the layout string but a plain
+    /// per-element property everywhere else. Modelling it as a property means an
+    /// exporter cannot emit it against the wrong element by reordering.
+    /// </remarks>
+    public int TooltipClilocId
+    {
+        get => _tooltipClilocId;
+        set => Set(ref _tooltipClilocId, value);
+    }
+
+    /// <summary>
+    /// Substitution arguments for <see cref="TooltipClilocId"/>, separated by
+    /// <c>@</c>, or empty for none.
+    /// </summary>
+    /// <remarks>
+    /// Stored without the surrounding delimiters the layout string uses:
+    /// <c>Bob@42</c> here is emitted as <c>@Bob@42@</c>.
+    /// </remarks>
+    public string TooltipArguments
+    {
+        get => _tooltipArguments;
+        set => Set(ref _tooltipArguments, value ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Serial of a world object whose server-side properties become this
+    /// element's tooltip, or 0 for none.
+    /// </summary>
+    /// <remarks>
+    /// The client fetches the properties over the mega-cliloc packet, so what is
+    /// displayed is decided by the shard, not by the gump.
+    /// </remarks>
+    public int ItemPropertySerial
+    {
+        get => _itemPropertySerial;
+        set => Set(ref _itemPropertySerial, value);
     }
 
     /// <summary>The group this element belongs to, or null for a page root.</summary>
@@ -132,6 +178,9 @@ public abstract class Element : INotifyPropertyChanged
         clone._comment = _comment;
         clone._location = _location;
         clone._size = _size;
+        clone._tooltipClilocId = _tooltipClilocId;
+        clone._tooltipArguments = _tooltipArguments;
+        clone._itemPropertySerial = _itemPropertySerial;
 
         CopyTo(clone);
 

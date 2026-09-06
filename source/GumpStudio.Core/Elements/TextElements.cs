@@ -18,6 +18,8 @@ public sealed class HtmlElement : ResizableElement
     private bool _showScrollbar;
     private bool _showBackground;
     private HtmlContentKind _contentKind = HtmlContentKind.Html;
+    private int _color;
+    private string _arguments = string.Empty;
 
     public HtmlElement() => SetInitialSize(200, 100);
 
@@ -55,6 +57,35 @@ public sealed class HtmlElement : ResizableElement
         set => Set(ref _contentKind, value);
     }
 
+    /// <summary>
+    /// Text colour as a packed RGB value, or 0 to leave it to the client.
+    /// </summary>
+    /// <remarks>
+    /// Only meaningful for a localised area: it selects the client's
+    /// <c>xmfhtmlgumpcolor</c> form over plain <c>xmfhtmlgump</c>. Literal markup
+    /// carries its own colour in a <c>BASEFONT</c> tag instead.
+    /// </remarks>
+    public int Color
+    {
+        get => _color;
+        set => Set(ref _color, value);
+    }
+
+    /// <summary>
+    /// Substitution arguments for the cliloc, separated by <c>@</c>, or empty for
+    /// none.
+    /// </summary>
+    /// <remarks>
+    /// Fills the <c>~1_THING~</c> placeholders a cliloc string can contain, and
+    /// selects the client's <c>xmfhtmltok</c> form. Stored without the
+    /// surrounding delimiters: <c>Bob@42</c> is emitted as <c>@Bob@42@</c>.
+    /// </remarks>
+    public string Arguments
+    {
+        get => _arguments;
+        set => Set(ref _arguments, value ?? string.Empty);
+    }
+
     protected override void CopyTo(Element target)
     {
         HtmlElement clone = (HtmlElement)target;
@@ -64,6 +95,8 @@ public sealed class HtmlElement : ResizableElement
         clone._showScrollbar = _showScrollbar;
         clone._showBackground = _showBackground;
         clone._contentKind = _contentKind;
+        clone._color = _color;
+        clone._arguments = _arguments;
     }
 
     protected override Element CreateInstance() => new HtmlElement();
@@ -85,6 +118,15 @@ public sealed class LabelElement : Element
     private bool _cropped;
 
     public override string TypeName => "Label";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// A plain label is exactly as big as its rendered text, so there is nothing
+    /// to drag. A cropped one is the client's <c>croppedtext</c>, which carries
+    /// its own width and height and clips the text to them — so the rectangle
+    /// becomes the thing being edited, and the element becomes resizable.
+    /// </remarks>
+    public override bool IsResizable => _cropped;
 
     public string Text
     {

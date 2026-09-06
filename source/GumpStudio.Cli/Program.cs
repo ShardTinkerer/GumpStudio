@@ -201,7 +201,36 @@ internal static class Program
         });
 
         page.Root.Add(new ItemElement { Location = new GumpPoint(20, 50), ItemId = 3821 });
-        page.Root.Add(new ButtonElement { Location = new GumpPoint(20, 120), NormalId = 247, PressedId = 248 });
+
+        // The commands the client gained after 1.8, so the sample exercises them
+        // too rather than only the original element set.
+        page.Root.Add(new PicInPicElement
+        {
+            Name = "Crop",
+            Location = new GumpPoint(20, 85),
+            Size = new GumpSize(60, 24),
+            GumpId = 1417,
+            SourceX = 10,
+            SourceY = 20,
+        });
+
+        page.Root.Add(new TileAsGumpElement
+        {
+            Name = "Icon",
+            Location = new GumpPoint(95, 85),
+            ItemId = 3823,
+        });
+
+        page.Root.Add(new ButtonElement
+        {
+            Location = new GumpPoint(20, 120),
+            NormalId = 247,
+            PressedId = 248,
+            TileId = 3823,
+            TileX = 4,
+            TileY = 2,
+            TooltipClilocId = 1011036,
+        });
 
         GroupElement group = new() { Name = "Nested", Location = new GumpPoint(150, 60) };
 

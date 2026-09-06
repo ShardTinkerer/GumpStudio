@@ -85,6 +85,14 @@ public sealed class PropertyRow
         }
 
         rows.AddRange(Specific(element));
+
+        // Every element can carry a tooltip: the client attaches one to whichever
+        // element it created last, which makes it a per-element property.
+        rows.Add(Integer("Tooltip cliloc", e => e.TooltipClilocId, (e, v) => e.TooltipClilocId = v));
+        rows.Add(Text("Tooltip args", e => e.TooltipArguments, (e, v) => e.TooltipArguments = v));
+        rows.Add(Integer("Item property serial",
+            e => e.ItemPropertySerial, (e, v) => e.ItemPropertySerial = v));
+
         rows.Add(Text("Comment", e => e.Comment, (e, v) => e.Comment = v));
 
         return rows;
@@ -111,6 +119,32 @@ public sealed class PropertyRow
                     e => ((ImageElement)e).GumpId, (e, v) => ((ImageElement)e).GumpId = v);
                 yield return Id("Hue", PropertyEditorKind.Hue,
                     e => ((ImageElement)e).Hue, (e, v) => ((ImageElement)e).Hue = v);
+                yield return Boolean("Partial hue",
+                    e => ((ImageElement)e).PartialHue, (e, v) => ((ImageElement)e).PartialHue = v);
+                break;
+
+            case PicInPicElement:
+                yield return Id("Gump id", PropertyEditorKind.GumpId,
+                    e => ((PicInPicElement)e).GumpId, (e, v) => ((PicInPicElement)e).GumpId = v);
+                yield return Integer("Source X",
+                    e => ((PicInPicElement)e).SourceX, (e, v) => ((PicInPicElement)e).SourceX = v);
+                yield return Integer("Source Y",
+                    e => ((PicInPicElement)e).SourceY, (e, v) => ((PicInPicElement)e).SourceY = v);
+                yield return Id("Hue", PropertyEditorKind.Hue,
+                    e => ((PicInPicElement)e).Hue, (e, v) => ((PicInPicElement)e).Hue = v);
+                yield return Boolean("Partial hue",
+                    e => ((PicInPicElement)e).PartialHue, (e, v) => ((PicInPicElement)e).PartialHue = v);
+                break;
+
+            case TileAsGumpElement:
+                yield return Id("Item id", PropertyEditorKind.ItemId,
+                    e => ((TileAsGumpElement)e).ItemId, (e, v) => ((TileAsGumpElement)e).ItemId = v);
+                yield return Integer("Link id",
+                    e => ((TileAsGumpElement)e).LinkId, (e, v) => ((TileAsGumpElement)e).LinkId = v);
+                yield return Integer("Param B",
+                    e => ((TileAsGumpElement)e).ParamB, (e, v) => ((TileAsGumpElement)e).ParamB = v);
+                yield return Integer("Param C",
+                    e => ((TileAsGumpElement)e).ParamC, (e, v) => ((TileAsGumpElement)e).ParamC = v);
                 break;
 
             case ItemElement:
@@ -137,6 +171,14 @@ public sealed class PropertyRow
                     e => ((ButtonElement)e).Kind.ToString(),
                     (e, v) => ((ButtonElement)e).Kind = Enum.Parse<ButtonKind>(v));
                 yield return Integer("Param", e => ((ButtonElement)e).Param, (e, v) => ((ButtonElement)e).Param = v);
+                yield return Id("Tile id", PropertyEditorKind.ItemId,
+                    e => ((ButtonElement)e).TileId, (e, v) => ((ButtonElement)e).TileId = v);
+                yield return Id("Tile hue", PropertyEditorKind.Hue,
+                    e => ((ButtonElement)e).TileHue, (e, v) => ((ButtonElement)e).TileHue = v);
+                yield return Integer("Tile X",
+                    e => ((ButtonElement)e).TileX, (e, v) => ((ButtonElement)e).TileX = v);
+                yield return Integer("Tile Y",
+                    e => ((ButtonElement)e).TileY, (e, v) => ((ButtonElement)e).TileY = v);
                 break;
 
             case RadioElement:
@@ -179,6 +221,10 @@ public sealed class PropertyRow
                     e => ((HtmlElement)e).ShowScrollbar, (e, v) => ((HtmlElement)e).ShowScrollbar = v);
                 yield return Boolean("Background",
                     e => ((HtmlElement)e).ShowBackground, (e, v) => ((HtmlElement)e).ShowBackground = v);
+                yield return Integer("Color",
+                    e => ((HtmlElement)e).Color, (e, v) => ((HtmlElement)e).Color = v);
+                yield return Text("Cliloc args",
+                    e => ((HtmlElement)e).Arguments, (e, v) => ((HtmlElement)e).Arguments = v);
                 break;
 
             default:

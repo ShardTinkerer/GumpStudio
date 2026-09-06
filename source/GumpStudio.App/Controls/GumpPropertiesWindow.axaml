@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.GumpPropertiesWindow"
+        Title="Gump properties"
+        Width="380" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel Margin="16" Spacing="12">
+
+    <TextBlock Text="Window" FontWeight="Bold" />
+
+    <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto">
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Open at X" VerticalAlignment="Center" />
+      <NumericUpDown Grid.Row="0" Grid.Column="1" Name="XBox"
+                     Minimum="-4096" Maximum="4096" Increment="1" FormatString="0" />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Open at Y" VerticalAlignment="Center"
+                 Margin="0,6,0,0" />
+      <NumericUpDown Grid.Row="1" Grid.Column="1" Name="YBox"
+                     Minimum="-4096" Maximum="4096" Increment="1" FormatString="0"
+                     Margin="0,6,0,0" />
+
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="Type id" VerticalAlignment="Center"
+                 Margin="0,6,0,0" />
+      <NumericUpDown Grid.Row="2" Grid.Column="1" Name="TypeIdBox"
+                     Minimum="0" Maximum="2147483647" Increment="1" FormatString="0"
+                     Margin="0,6,0,0" />
+    </Grid>
+
+    <CheckBox Name="MovableBox" Content="Player can drag the gump" />
+    <CheckBox Name="ClosableBox" Content="Right-click closes the gump" />
+    <CheckBox Name="DisposableBox" Content="Esc closes the gump" />
+
+    <TextBlock Text="Client behaviour" FontWeight="Bold" Margin="0,6,0,0" />
+
+    <Grid ColumnDefinitions="120,*">
+      <TextBlock Grid.Column="0" Text="Master gump id" VerticalAlignment="Center"
+                 ToolTip.Tip="Links this gump under another as a child window. 0 for none." />
+      <NumericUpDown Grid.Column="1" Name="MasterGumpBox"
+                     Minimum="0" Maximum="2147483647" Increment="1" FormatString="0" />
+    </Grid>
+
+    <CheckBox Name="UpperWordCaseBox" Content="Title-case each word of localised HTML"
+              ToolTip.Tip="The client's toggleupperwordcase." />
+    <CheckBox Name="CroppedTextBox" Content="Cropped-text rendering mode"
+              ToolTip.Tip="The client's togglecroppedtext." />
+    <CheckBox Name="EnhancedInputBox" Content="Enhanced Client input handling"
+              ToolTip.Tip="The client's echandleinput. The classic client accepts it but does nothing with it." />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,6,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="80" />
+      <Button Name="AcceptButton" Content="OK" MinWidth="80" IsDefault="True" />
+    </StackPanel>
+
+  </StackPanel>
+</Window>

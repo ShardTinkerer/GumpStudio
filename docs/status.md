@@ -153,7 +153,7 @@ and writes a PNG.
 
 ## Phase 4 — Avalonia shell ✅
 
-Done. 328 tests across the solution; 6 skip when the single-client
+Done. 368 tests across the solution; 6 skip when the single-client
 environment variables are unset, and the client-data theories skip entirely when
 no installation is configured, so CI stays green.
 
@@ -387,6 +387,47 @@ Anything already handled by the rewrite is marked.
 - Splash thread is not STA; no DPI awareness; no single-instance guard.
 - `Program.cs` sets `PrivateBinPath` on an already-created AppDomain (a no-op).
 
+## Gump commands added after 1.8
+
+The client gained sixteen layout commands after GumpStudio 1.8 was written, and
+none of them were modelled. They are now, and
+[gump-commands.md](gump-commands.md) maps every command the client accepts onto
+the document model.
+
+Most of them are properties rather than new element types, because that is what
+they are to the client too — `gumppicphued` is `gumppic` with a different tinting
+rule, `textentrylimited` is `textentry` with a cap. Only `picinpic` and
+`tilepicasgumppic` say something the model could not already say, so only those
+two became element types (`PicInPicElement`, `TileAsGumpElement`).
+
+`tooltip` and `itemproperty` became properties on the **base** element, since the
+client attaches them to whichever element it created last: that makes them
+positional in a layout string but per-element everywhere else. Storing them on
+the element means an exporter cannot attach one to the wrong element by
+reordering its output.
+
+The gump-level parser toggles — `mastergump`, `toggleupperwordcase`,
+`togglecroppedtext`, `echandleinput` — became `GumpProperties`, and a
+**Gump ▸ Properties…** dialog was added to reach them. Those flags, along with the
+movable/closable/disposable ones that existed all along, previously had no editor
+at all: they round-tripped through save and load and reached the exporters, but
+the only way to change one was to hand-edit the file.
+
+Three defects surfaced while doing this, all confirmed against the client's own
+parser, the POL command reference and RunUO, which agree with each other:
+
+- **`button` had all three of its trailing slots wrong.** It inverted the quit
+  flag, put a page button's target page in the return-value slot, and a reply
+  button's return value in the page slot — so a page button closed the gump and a
+  reply button jumped to a page numbered after its reply id. The 1.8 source
+  carries a `// TODO: Page or Reply???` comment at exactly that spot.
+- **Radio groups leaked across pages.** `page` resets the client's current group,
+  but the exporter tracked the last group used for the whole document, so a
+  second page whose first radio matched the previous page's group never got its
+  `group` command and every radio on it fell into group 0.
+- **No `endgroup` was ever emitted**, so any radio placed after the last group on
+  a page silently joined it.
+
 ## The 1.8r3 binaries
 
 `external/` holds both `Gumpstudio1.8r2` and `Gumpstudio1.8r3`. r3 was checked
@@ -421,7 +462,6 @@ and r2 remains the behaviour reference.**
   for every project, reproducibly, including for a one-file xunit.v3 project in
   an empty directory. `eng/run-tests.ps1` launches the test applications
   directly instead. Retry `dotnet test` after an SDK bump.
-- **Gump commands added after 1.8 are not modelled yet** — `picinpic`,
-  `buttontileart`, `xmfhtmltok`, `tooltip`, `itemproperty`, `mastergump` and the
-  rest. These are the next piece of work, and the RunUO and Sphere exporters
-  follow, since they need the element types to exist first.
+- **The RunUO and Sphere exporters are not ported yet.** They were dropped from
+  the original plan and put back at the user's request; the element types they
+  need now exist, so they are the next piece of work.

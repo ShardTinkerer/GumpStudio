@@ -236,8 +236,15 @@ public sealed class GumpRenderer(IGumpArtSource art)
                     item.SetContentSize(art.Width, art.Height);
                     break;
 
-                case LabelElement label when _art.GetText(label.FontIndex, label.Text) is { } art:
+                // A cropped label's rectangle is the user's, not the text's, so
+                // measuring it would silently undo every resize.
+                case LabelElement { Cropped: false } label
+                    when _art.GetText(label.FontIndex, label.Text) is { } art:
                     label.SetContentSize(art.Width, art.Height);
+                    break;
+
+                case TileAsGumpElement tile when _art.GetItem(tile.ItemId) is { } art:
+                    tile.SetContentSize(art.Width, art.Height);
                     break;
 
                 case ButtonElement button when _art.GetGump(button.NormalId) is { } art:

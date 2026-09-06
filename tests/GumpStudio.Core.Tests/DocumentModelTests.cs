@@ -1,3 +1,4 @@
+using GumpStudio.Core.Commands;
 using GumpStudio.Core.Document;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Primitives;
@@ -219,5 +220,172 @@ public class GumpDocumentTests
         Assert.False(clone.Properties.Movable);
         Assert.Single(clone.Pages[0].Root.Children);
         Assert.NotSame(document.Pages[0].Root.Children[0], clone.Pages[0].Root.Children[0]);
+    }
+}
+
+/// <summary>
+/// The gump commands the client gained after GumpStudio 1.8 was written.
+/// </summary>
+/// <remarks>
+/// Most of them are properties on existing elements rather than new types,
+/// because that is what they are to the client too: <c>gumppicphued</c> is
+/// <c>gumppic</c> with a different tinting rule, <c>textentrylimited</c> is
+/// <c>textentry</c> with a cap. Only <c>picinpic</c> and
+/// <c>tilepicasgumppic</c> describe something the model could not already say.
+/// </remarks>
+public class LateGumpCommandTests
+{
+    [Fact]
+    public void ALabelIsResizableOnlyOnceItIsCropped()
+    {
+        LabelElement label = new();
+
+        Assert.False(label.IsResizable);
+
+        // A plain label is exactly as big as its text, so a size assignment has
+        // nothing to mean and is ignored.
+        label.Size = new GumpSize(80, 20);
+
+        Assert.Equal(default, label.Size);
+
+        label.Cropped = true;
+
+        Assert.True(label.IsResizable);
+
+        label.Size = new GumpSize(80, 20);
+
+        Assert.Equal(new GumpSize(80, 20), label.Size);
+    }
+
+    [Fact]
+    public void CloningCarriesTheTooltipAttachment()
+    {
+        ImageElement original = new()
+        {
+            GumpId = 42,
+            PartialHue = true,
+            TooltipClilocId = 1042971,
+            TooltipArguments = "Bob@7",
+            ItemPropertySerial = 0x4000_0001,
+        };
+
+        ImageElement clone = (ImageElement)original.Clone();
+
+        Assert.Equal(1042971, clone.TooltipClilocId);
+        Assert.Equal("Bob@7", clone.TooltipArguments);
+        Assert.Equal(0x4000_0001, clone.ItemPropertySerial);
+        Assert.True(clone.PartialHue);
+    }
+
+    [Fact]
+    public void CloningCarriesTheNewElementTypes()
+    {
+        PicInPicElement pic = new()
+        {
+            GumpId = 9000,
+            SourceX = 4,
+            SourceY = 5,
+            Size = new GumpSize(20, 30),
+            Hue = 6,
+            PartialHue = true,
+        };
+
+        PicInPicElement picClone = (PicInPicElement)pic.Clone();
+
+        Assert.Equal(9000, picClone.GumpId);
+        Assert.Equal(4, picClone.SourceX);
+        Assert.Equal(5, picClone.SourceY);
+        Assert.Equal(new GumpSize(20, 30), picClone.Size);
+        Assert.True(picClone.PartialHue);
+
+        TileAsGumpElement tile = new() { ItemId = 3821, LinkId = 1, ParamB = 2, ParamC = 3 };
+        TileAsGumpElement tileClone = (TileAsGumpElement)tile.Clone();
+
+        Assert.Equal(3821, tileClone.ItemId);
+        Assert.Equal(1, tileClone.LinkId);
+        Assert.Equal(2, tileClone.ParamB);
+        Assert.Equal(3, tileClone.ParamC);
+    }
+
+    [Fact]
+    public void ButtonTileArtSurvivesACloneAndDefaultsToOff()
+    {
+        ButtonElement plain = new();
+
+        Assert.Equal(0, plain.TileId);
+
+        ButtonElement clone = (ButtonElement)new ButtonElement
+        {
+            TileId = 3821,
+            TileHue = 33,
+            TileX = 4,
+            TileY = 5,
+        }.Clone();
+
+        Assert.Equal(3821, clone.TileId);
+        Assert.Equal(33, clone.TileHue);
+        Assert.Equal(4, clone.TileX);
+        Assert.Equal(5, clone.TileY);
+    }
+
+    [Fact]
+    public void GumpLevelFlagsSurviveACloneOfTheDocument()
+    {
+        GumpDocument document = new();
+
+        document.Properties.MasterGumpId = 3000;
+        document.Properties.UpperWordCase = true;
+        document.Properties.CroppedText = true;
+        document.Properties.EnhancedClientInput = true;
+
+        GumpProperties clone = document.Clone().Properties;
+
+        Assert.Equal(3000, clone.MasterGumpId);
+        Assert.True(clone.UpperWordCase);
+        Assert.True(clone.CroppedText);
+        Assert.True(clone.EnhancedClientInput);
+    }
+
+    [Fact]
+    public void SettingGumpPropertiesIsUndoable()
+    {
+        GumpDocument document = new();
+        UndoHistory history = new();
+
+        history.Push(new SetGumpPropertiesCommand(
+            document,
+            new GumpProperties { MasterGumpId = 3000, Movable = false }));
+
+        Assert.Equal(3000, document.Properties.MasterGumpId);
+        Assert.False(document.Properties.Movable);
+
+        history.Undo();
+
+        Assert.Equal(0, document.Properties.MasterGumpId);
+        Assert.True(document.Properties.Movable);
+
+        history.Redo();
+
+        Assert.Equal(3000, document.Properties.MasterGumpId);
+    }
+
+    /// <summary>
+    /// The command clones on every application, so undoing does not hand the
+    /// document an object the command is still holding and mutating.
+    /// </summary>
+    [Fact]
+    public void UndoingGumpPropertiesDoesNotShareTheStoredObject()
+    {
+        GumpDocument document = new();
+        UndoHistory history = new();
+        GumpProperties applied = new() { MasterGumpId = 3000 };
+
+        history.Push(new SetGumpPropertiesCommand(document, applied));
+
+        document.Properties.MasterGumpId = 7;
+        history.Undo();
+        history.Redo();
+
+        Assert.Equal(3000, document.Properties.MasterGumpId);
     }
 }

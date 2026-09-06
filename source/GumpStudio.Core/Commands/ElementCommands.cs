@@ -1,3 +1,4 @@
+using GumpStudio.Core.Document;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Primitives;
 
@@ -247,4 +248,34 @@ public sealed class GroupElementsCommand : IUndoableCommand
             _parent.Insert(Math.Min(index, _parent.Children.Count), element);
         }
     }
+}
+
+/// <summary>Replaces the gump-level properties.</summary>
+/// <remarks>
+/// Whole-object rather than per-field, because the properties dialog commits
+/// every field at once and one undo entry per checkbox would be tedious.
+/// </remarks>
+public sealed class SetGumpPropertiesCommand : IUndoableCommand
+{
+    private readonly GumpDocument _document;
+    private readonly GumpProperties _before;
+    private readonly GumpProperties _after;
+
+    public SetGumpPropertiesCommand(GumpDocument document, GumpProperties properties)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(properties);
+
+        _document = document;
+        _before = document.Properties.Clone();
+        _after = properties.Clone();
+    }
+
+    public string Description => "Gump properties";
+
+    // Cloned on each application, so undoing and redoing cannot hand the document
+    // an object the command still holds a reference to.
+    public void Execute() => _document.Properties = _after.Clone();
+
+    public void Undo() => _document.Properties = _before.Clone();
 }

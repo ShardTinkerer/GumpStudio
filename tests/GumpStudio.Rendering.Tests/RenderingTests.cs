@@ -477,3 +477,162 @@ public class SharedPageTests
         return bitmap;
     }
 }
+
+/// <summary>Rendering for the gump commands added after GumpStudio 1.8.</summary>
+public class LateGumpCommandRenderingTests
+{
+    private static readonly SKColor Red = new(0xFF, 0x00, 0x00);
+    private static readonly SKColor Blue = new(0x00, 0x00, 0xFF);
+
+    /// <summary>
+    /// The source region is cut out by clipping and shifting, so the proof is
+    /// that the part of the source lying past the element's own rectangle is gone
+    /// and the part before its origin never appears.
+    /// </summary>
+    [Fact]
+    public void PicInPicDrawsTheSourceRegionAndClipsTheRest()
+    {
+        using FakeArtSource art = new();
+
+        // A 40x40 source, of which the region starting at (30, 30) is wanted. Only
+        // 10x10 of the source is left past that point, so a 20x20 element shows
+        // colour in its first ten pixels and nothing after.
+        art.AddGump(9000, 40, 40, Red);
+
+        GumpPage page = new();
+
+        page.Root.Add(new PicInPicElement
+        {
+            GumpId = 9000,
+            Location = new GumpPoint(4, 4),
+            Size = new GumpSize(20, 20),
+            SourceX = 30,
+            SourceY = 30,
+        });
+
+        GumpRenderer renderer = new(new TestArtSource(art));
+
+        using SKBitmap output = renderer.RenderToBitmap(page, 64, 64, RenderOptions.Plain);
+
+        Assert.Equal(Red, output.GetPixel(4, 4));
+        Assert.Equal(Red, output.GetPixel(13, 13));
+
+        // Past the end of the source region.
+        Assert.Equal(0, output.GetPixel(14, 14).Alpha);
+
+        // Never outside the element, however big the source is.
+        Assert.Equal(0, output.GetPixel(3, 4).Alpha);
+        Assert.Equal(0, output.GetPixel(24, 24).Alpha);
+    }
+
+    [Fact]
+    public void AButtonWithTileArtDrawsTheOverlayAtItsOffset()
+    {
+        using FakeArtSource art = new();
+
+        art.AddGump(247, 20, 20, Red);
+        art.AddItem(3821, 4, 4, Blue);
+
+        GumpPage page = new();
+
+        page.Root.Add(new ButtonElement
+        {
+            NormalId = 247,
+            PressedId = 248,
+            Location = GumpPoint.Origin,
+            TileId = 3821,
+            TileX = 5,
+            TileY = 6,
+        });
+
+        GumpRenderer renderer = new(new TestArtSource(art));
+
+        using SKBitmap output = renderer.RenderToBitmap(page, 32, 32, RenderOptions.Plain);
+
+        Assert.Equal(Blue, output.GetPixel(5, 6));
+        Assert.Equal(Blue, output.GetPixel(8, 9));
+
+        // The button art still shows everywhere the overlay does not cover.
+        Assert.Equal(Red, output.GetPixel(0, 0));
+        Assert.Equal(Red, output.GetPixel(9, 6));
+    }
+
+    [Fact]
+    public void AButtonWithoutTileArtDrawsOnlyTheButton()
+    {
+        using FakeArtSource art = new();
+
+        art.AddGump(247, 20, 20, Red);
+        art.AddItem(3821, 4, 4, Blue);
+
+        GumpPage page = new();
+
+        page.Root.Add(new ButtonElement { NormalId = 247, PressedId = 248, Location = GumpPoint.Origin });
+
+        GumpRenderer renderer = new(new TestArtSource(art));
+
+        using SKBitmap output = renderer.RenderToBitmap(page, 32, 32, RenderOptions.Plain);
+
+        Assert.Equal(Red, output.GetPixel(5, 6));
+    }
+
+    [Fact]
+    public void TileArtInAGumpSlotDrawsItsItemArt()
+    {
+        using FakeArtSource art = new();
+
+        art.AddItem(3821, 8, 8, Blue);
+
+        GumpPage page = new();
+
+        page.Root.Add(new TileAsGumpElement { ItemId = 3821, Location = new GumpPoint(3, 4) });
+
+        GumpRenderer renderer = new(new TestArtSource(art));
+
+        using SKBitmap output = renderer.RenderToBitmap(page, 32, 32, RenderOptions.Plain);
+
+        Assert.Equal(Blue, output.GetPixel(3, 4));
+        Assert.Equal(0, output.GetPixel(2, 4).Alpha);
+    }
+
+    /// <summary>
+    /// A plain label takes its size from the rendered text, but a cropped one owns
+    /// its rectangle. Measuring a cropped label would silently undo every resize
+    /// the user made.
+    /// </summary>
+    [Fact]
+    public void MeasuringLeavesACroppedLabelsRectangleAlone()
+    {
+        using FakeArtSource art = new();
+
+        LabelElement plain = new() { Text = "measure me" };
+        LabelElement cropped = new() { Text = "measure me", Cropped = true, Size = new GumpSize(7, 3) };
+
+        GumpPage page = new();
+
+        page.Root.Add(plain);
+        page.Root.Add(cropped);
+
+        new GumpRenderer(new TestArtSource(art)).MeasureContentSizes(page);
+
+        Assert.Equal(new GumpSize(7, 3), cropped.Size);
+        Assert.NotEqual(default, plain.Size);
+    }
+
+    [Fact]
+    public void MeasuringSizesTileArtInAGumpSlotFromItsArt()
+    {
+        using FakeArtSource art = new();
+
+        art.AddItem(3821, 8, 12, Blue);
+
+        TileAsGumpElement tile = new() { ItemId = 3821 };
+        GumpPage page = new();
+
+        page.Root.Add(tile);
+
+        new GumpRenderer(new TestArtSource(art)).MeasureContentSizes(page);
+
+        Assert.Equal(new GumpSize(8, 12), tile.Size);
+    }
+}

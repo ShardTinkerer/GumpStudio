@@ -21,6 +21,37 @@ public sealed class GumpProperties
     /// <summary>A user-defined type id some exporters emit.</summary>
     public int TypeId { get; set; }
 
+    /// <summary>
+    /// Gump id this window is linked under as a child, or 0 for none.
+    /// </summary>
+    /// <remarks>
+    /// The client's <c>mastergump</c> command, which overrides the id from the
+    /// delivering packet for the purpose of parent/child linkage. Container and
+    /// companion windows use it to be treated as a sub-window of an existing gump.
+    /// </remarks>
+    public int MasterGumpId { get; set; }
+
+    /// <summary>
+    /// Title-cases each word of every localised HTML area in the gump.
+    /// </summary>
+    /// <remarks>
+    /// The client's <c>toggleupperwordcase</c> is a parser flag that flips on and
+    /// stays flipped until the end of the definition, so it is a property of the
+    /// gump rather than of any one element.
+    /// </remarks>
+    public bool UpperWordCase { get; set; }
+
+    /// <summary>Enables the client's cropped-text rendering mode for the gump.</summary>
+    /// <remarks>Same reasoning as <see cref="UpperWordCase"/>: a sticky parser flag.</remarks>
+    public bool CroppedText { get; set; }
+
+    /// <summary>Sets the Enhanced Client input-handling flag.</summary>
+    /// <remarks>
+    /// The classic client accepts the <c>echandleinput</c> token and flips the
+    /// flag, but only the Enhanced Client acts on it.
+    /// </remarks>
+    public bool EnhancedClientInput { get; set; }
+
     public GumpProperties Clone() => new()
     {
         Location = Location,
@@ -28,6 +59,10 @@ public sealed class GumpProperties
         Closable = Closable,
         Disposable = Disposable,
         TypeId = TypeId,
+        MasterGumpId = MasterGumpId,
+        UpperWordCase = UpperWordCase,
+        CroppedText = CroppedText,
+        EnhancedClientInput = EnhancedClientInput,
     };
 }
 

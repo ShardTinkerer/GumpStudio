@@ -27,7 +27,7 @@ namespace GumpStudio.Core.Serialization;
 public static class GumpXmlSerializer
 {
     /// <summary>Format version written to new files.</summary>
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 
     private const string RootName = "gump";
 
@@ -45,6 +45,8 @@ public static class GumpXmlSerializer
             ["Image"] = () => new ImageElement(),
             ["Item"] = () => new ItemElement(),
             ["Label"] = () => new LabelElement(),
+            ["PicInPic"] = () => new PicInPicElement(),
+            ["TileAsGump"] = () => new TileAsGumpElement(),
             ["TextEntry"] = () => new TextEntryElement(),
             ["Tiled"] = () => new TiledElement(),
         };
@@ -180,7 +182,11 @@ public static class GumpXmlSerializer
             new XAttribute("movable", properties.Movable),
             new XAttribute("closable", properties.Closable),
             new XAttribute("disposable", properties.Disposable),
-            new XAttribute("typeId", properties.TypeId));
+            new XAttribute("typeId", properties.TypeId),
+            new XAttribute("masterGumpId", properties.MasterGumpId),
+            new XAttribute("upperWordCase", properties.UpperWordCase),
+            new XAttribute("croppedText", properties.CroppedText),
+            new XAttribute("echandleInput", properties.EnhancedClientInput));
 
     private static GumpProperties ReadProperties(XElement element) => new()
     {
@@ -189,6 +195,10 @@ public static class GumpXmlSerializer
         Closable = ReadBool(element, "closable", true),
         Disposable = ReadBool(element, "disposable", true),
         TypeId = ReadInt(element, "typeId", 0),
+        MasterGumpId = ReadInt(element, "masterGumpId", 0),
+        UpperWordCase = ReadBool(element, "upperWordCase", false),
+        CroppedText = ReadBool(element, "croppedText", false),
+        EnhancedClientInput = ReadBool(element, "echandleInput", false),
     };
 
     private static XElement WriteElement(Element element)
@@ -212,6 +222,23 @@ public static class GumpXmlSerializer
         if (!string.IsNullOrEmpty(element.Comment))
         {
             node.SetAttributeValue("comment", element.Comment);
+        }
+
+        // Written only when set, so a document with no tooltips looks exactly as
+        // it did before these attributes existed.
+        if (element.TooltipClilocId != 0)
+        {
+            node.SetAttributeValue("tooltip", element.TooltipClilocId);
+        }
+
+        if (!string.IsNullOrEmpty(element.TooltipArguments))
+        {
+            node.SetAttributeValue("tooltipArgs", element.TooltipArguments);
+        }
+
+        if (element.ItemPropertySerial != 0)
+        {
+            node.SetAttributeValue("itemProperty", element.ItemPropertySerial);
         }
 
         WriteSpecific(element, node);
@@ -248,6 +275,22 @@ public static class GumpXmlSerializer
             case ImageElement image:
                 node.SetAttributeValue("gumpId", image.GumpId);
                 node.SetAttributeValue("hue", image.Hue);
+                node.SetAttributeValue("partialHue", image.PartialHue);
+                break;
+
+            case PicInPicElement pic:
+                node.SetAttributeValue("gumpId", pic.GumpId);
+                node.SetAttributeValue("sourceX", pic.SourceX);
+                node.SetAttributeValue("sourceY", pic.SourceY);
+                node.SetAttributeValue("hue", pic.Hue);
+                node.SetAttributeValue("partialHue", pic.PartialHue);
+                break;
+
+            case TileAsGumpElement tile:
+                node.SetAttributeValue("itemId", tile.ItemId);
+                node.SetAttributeValue("linkId", tile.LinkId);
+                node.SetAttributeValue("paramB", tile.ParamB);
+                node.SetAttributeValue("paramC", tile.ParamC);
                 break;
 
             case ItemElement item:
@@ -260,6 +303,10 @@ public static class GumpXmlSerializer
                 node.SetAttributeValue("pressedId", button.PressedId);
                 node.SetAttributeValue("kind", button.Kind);
                 node.SetAttributeValue("param", button.Param);
+                node.SetAttributeValue("tileId", button.TileId);
+                node.SetAttributeValue("tileHue", button.TileHue);
+                node.SetAttributeValue("tileX", button.TileX);
+                node.SetAttributeValue("tileY", button.TileY);
 
                 if (!string.IsNullOrEmpty(button.CodeBehind))
                 {
@@ -283,6 +330,12 @@ public static class GumpXmlSerializer
                 node.SetAttributeValue("clilocId", html.ClilocId);
                 node.SetAttributeValue("scrollbar", html.ShowScrollbar);
                 node.SetAttributeValue("background", html.ShowBackground);
+                node.SetAttributeValue("color", html.Color);
+
+                if (!string.IsNullOrEmpty(html.Arguments))
+                {
+                    node.SetAttributeValue("args", html.Arguments);
+                }
 
                 if (!string.IsNullOrEmpty(html.Html))
                 {
@@ -337,6 +390,13 @@ public static class GumpXmlSerializer
         element.Name = (string?)node.Attribute("name") ?? element.TypeName;
         element.Comment = (string?)node.Attribute("comment") ?? string.Empty;
         element.Location = new GumpPoint(ReadInt(node, "x", 0), ReadInt(node, "y", 0));
+        element.TooltipClilocId = ReadInt(node, "tooltip", 0);
+        element.TooltipArguments = (string?)node.Attribute("tooltipArgs") ?? string.Empty;
+        element.ItemPropertySerial = ReadInt(node, "itemProperty", 0);
+
+        // Before the size: a label only becomes resizable once it is cropped, so
+        // reading w/h first would drop the crop rectangle on the floor.
+        ReadResizeGate(element, node);
 
         if (element.IsResizable)
         {
@@ -378,6 +438,22 @@ public static class GumpXmlSerializer
             case ImageElement image:
                 image.GumpId = ReadInt(node, "gumpId", image.GumpId);
                 image.Hue = ReadInt(node, "hue", 0);
+                image.PartialHue = ReadBool(node, "partialHue", false);
+                break;
+
+            case PicInPicElement pic:
+                pic.GumpId = ReadInt(node, "gumpId", pic.GumpId);
+                pic.SourceX = ReadInt(node, "sourceX", 0);
+                pic.SourceY = ReadInt(node, "sourceY", 0);
+                pic.Hue = ReadInt(node, "hue", 0);
+                pic.PartialHue = ReadBool(node, "partialHue", false);
+                break;
+
+            case TileAsGumpElement tile:
+                tile.ItemId = ReadInt(node, "itemId", tile.ItemId);
+                tile.LinkId = ReadInt(node, "linkId", 0);
+                tile.ParamB = ReadInt(node, "paramB", 0);
+                tile.ParamC = ReadInt(node, "paramC", 0);
                 break;
 
             case ItemElement item:
@@ -390,6 +466,10 @@ public static class GumpXmlSerializer
                 button.PressedId = ReadInt(node, "pressedId", button.PressedId);
                 button.Kind = ReadEnum(node, "kind", ButtonKind.Reply);
                 button.Param = ReadInt(node, "param", 0);
+                button.TileId = ReadInt(node, "tileId", 0);
+                button.TileHue = ReadInt(node, "tileHue", 0);
+                button.TileX = ReadInt(node, "tileX", 0);
+                button.TileY = ReadInt(node, "tileY", 0);
                 button.CodeBehind = (string?)node.Element("codeBehind") ?? string.Empty;
                 break;
 
@@ -407,13 +487,14 @@ public static class GumpXmlSerializer
                 html.ClilocId = ReadInt(node, "clilocId", html.ClilocId);
                 html.ShowScrollbar = ReadBool(node, "scrollbar", false);
                 html.ShowBackground = ReadBool(node, "background", false);
+                html.Color = ReadInt(node, "color", 0);
+                html.Arguments = (string?)node.Attribute("args") ?? string.Empty;
                 html.Html = (string?)node.Element("html") ?? string.Empty;
                 break;
 
             case LabelElement label:
                 label.Hue = ReadInt(node, "hue", 0);
                 label.FontIndex = ReadInt(node, "font", 0);
-                label.Cropped = ReadBool(node, "cropped", false);
                 label.Text = (string?)node.Element("text") ?? string.Empty;
                 break;
 
@@ -426,6 +507,22 @@ public static class GumpXmlSerializer
 
             default:
                 throw new NotSupportedException($"No deserializer for element type '{element.TypeName}'.");
+        }
+    }
+
+    /// <summary>
+    /// Applies the properties that decide whether an element is resizable.
+    /// </summary>
+    /// <remarks>
+    /// Only a cropped label qualifies today. Its rectangle can only be assigned
+    /// once <c>Cropped</c> is set, because <see cref="Element.Size"/> ignores
+    /// writes to an element that is not resizable.
+    /// </remarks>
+    private static void ReadResizeGate(Element element, XElement node)
+    {
+        if (element is LabelElement label)
+        {
+            label.Cropped = ReadBool(node, "cropped", false);
         }
     }
 
