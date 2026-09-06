@@ -217,6 +217,17 @@ item-id row — the one control in the panel that sits hard against the right
 edge. The property scroller sets `AllowAutoHide="False"` and the content carries
 a matching right margin, so the bar has a gutter of its own.
 
+Scroll bars are also **full width everywhere**, set once in `App.axaml`. Fluent
+draws one as a hairline until the pointer is over it and only then animates it to
+size, which is a poor trade in a picker: you scroll far more than you point, and
+a two-pixel line is both hard to grab and hard to read as a position.
+
+Forcing it is less obvious than it looks. `ScrollBar.IsExpanded` is exactly the
+right property and it is a **read-only direct property** — a style setter for it
+compiles happily and then throws `The property IsExpanded is readonly` at
+startup. The working route is to give the bar a real width and size its thumb,
+which leaves the track and its stepper buttons drawn at all times.
+
 The properties header moved inside the scrolling row rather than occupying a row
 of its own: a splitter resizes the rows on either side of it, and an `Auto`
 header between them would have been the thing that got resized.

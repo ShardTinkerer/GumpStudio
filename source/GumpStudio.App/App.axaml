@@ -5,6 +5,30 @@
 
   <Application.Styles>
     <FluentTheme />
+
+    <Style Selector="ScrollBar">
+      <Setter Property="AllowAutoHide" Value="False" />
+    </Style>
+
+    <Style Selector="ScrollBar:vertical">
+      <Setter Property="Width" Value="14" />
+    </Style>
+
+    <Style Selector="ScrollBar:horizontal">
+      <Setter Property="Height" Value="14" />
+    </Style>
+
+    <Style Selector="ScrollBar:vertical /template/ Thumb">
+      <Setter Property="Width" Value="10" />
+    </Style>
+
+    <Style Selector="ScrollBar:horizontal /template/ Thumb">
+      <Setter Property="Height" Value="10" />
+    </Style>
+
+    <Style Selector="ScrollBar /template/ Rectangle#TrackRect">
+      <Setter Property="Opacity" Value="1" />
+    </Style>
   </Application.Styles>
 
 </Application>
