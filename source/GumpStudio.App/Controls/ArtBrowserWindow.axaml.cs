@@ -105,6 +105,8 @@ public sealed partial class ArtBrowserWindow : Window
     private Bitmap? _previewBitmap;
     private int _columns = 1;
     private int _tileSize = 144;
+    private double _chunkedWidth = -1;
+    private bool _reflowPending;
 
     /// <summary>Parameterless constructor for the XAML designer.</summary>
     public ArtBrowserWindow()
@@ -298,8 +300,18 @@ public sealed partial class ArtBrowserWindow : Window
     }
 
     /// <summary>Feeds the current matches to the list in the shape the mode needs.</summary>
+    /// <remarks>
+    /// The source is cleared before the new one is assigned. Handing the panel a
+    /// replacement directly leaves it reconciling one set of rows against
+    /// another, and a container realised for the old set can be left parented and
+    /// visible with nothing to remove it — a row of tiles from a previous
+    /// chunking, stranded on screen at a different column pitch, surviving every
+    /// later re-chunk.
+    /// </remarks>
     private void Rebind()
     {
+        _results.ItemsSource = null;
+
         if (!IsGallery)
         {
             _results.ItemsSource = _matches;
@@ -309,6 +321,8 @@ public sealed partial class ArtBrowserWindow : Window
         }
 
         _columns = ColumnCount();
+        _chunkedWidth = _results.Bounds.Width;
+
         _results.SelectedItem = null;
         _results.ItemsSource = Chunk(_matches, _columns);
     }
@@ -322,28 +336,78 @@ public sealed partial class ArtBrowserWindow : Window
         return Math.Max(1, (int)(usable / CellWidth));
     }
 
+    /// <summary>
+    /// Re-chunks when the panel's width has changed enough to fit a different
+    /// number of columns.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The work is posted rather than done inline, because this runs from layout
+    /// notifications: replacing the item source in the middle of a layout pass is
+    /// what stranded rows from a previous chunking on screen.
+    /// </para>
+    /// <para>
+    /// It is also gated on the width itself, not just on the resulting column
+    /// count. Rebinding changes the content, which can change whether a scroll
+    /// bar is needed, which changes the width — and two widths that disagree
+    /// about the column count would otherwise re-chunk each other forever.
+    /// </para>
+    /// </remarks>
     private void ReflowIfNeeded()
     {
-        if (!IsGallery || ColumnCount() == _columns)
+        if (!IsGallery || _reflowPending)
         {
             return;
         }
 
-        Rebind();
+        double width = _results.Bounds.Width;
 
-        if (_selected is not null)
+        if (Math.Abs(width - _chunkedWidth) < 1 || ColumnCount() == _columns)
         {
-            ScrollTo(_selected);
+            return;
         }
+
+        _reflowPending = true;
+
+        Dispatcher.UIThread.Post(
+            () =>
+            {
+                _reflowPending = false;
+
+                if (!IsGallery || ColumnCount() == _columns)
+                {
+                    _chunkedWidth = _results.Bounds.Width;
+
+                    return;
+                }
+
+                Rebind();
+
+                if (_selected is not null)
+                {
+                    ScrollTo(_selected);
+                }
+            },
+            DispatcherPriority.Background);
     }
 
+    /// <summary>Splits the matches into rows of <paramref name="columns"/> tiles.</summary>
+    /// <remarks>
+    /// Copied by range rather than with <c>Skip</c>/<c>Take</c>: skipping walks
+    /// the list from the start every time, which on forty thousand entries is
+    /// quadratic and takes noticeably longer than decoding the art does.
+    /// </remarks>
     private static List<ArtEntry[]> Chunk(List<ArtEntry> entries, int columns)
     {
         List<ArtEntry[]> rows = new(entries.Count / columns + 1);
 
         for (int i = 0; i < entries.Count; i += columns)
         {
-            rows.Add([.. entries.Skip(i).Take(columns)]);
+            int length = Math.Min(columns, entries.Count - i);
+            ArtEntry[] row = new ArtEntry[length];
+
+            entries.CopyTo(i, row, 0, length);
+            rows.Add(row);
         }
 
         return rows;

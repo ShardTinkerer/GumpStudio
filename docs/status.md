@@ -292,6 +292,36 @@ highlight gave it something to hit. Unselected tiles are painted
 before and after: the unselected tile reported zero hits at its corner and one
 afterwards.
 
+### The stranded row
+
+Reported: rows of tiles appearing at the wrong column pitch, overlapping the real
+grid, most often after changing the tile size — and surviving a switch to the
+list and back.
+
+Two causes, both in re-chunking:
+
+- **The item source was replaced directly.** Handing the panel a new list leaves
+  it reconciling one set of rows against another, and a container realised for
+  the old set could be left parented and visible with nothing to remove it. The
+  source is cleared first now.
+- **Re-chunking ran inside a layout pass.** The reflow was driven from
+  `SizeChanged` and `LayoutUpdated` and rebound inline, so the panel was handed a
+  different row list while it was still laying out the previous one. The work is
+  posted now, and gated on the panel's *width* rather than only on the resulting
+  column count — rebinding changes the content, which can change whether a scroll
+  bar is needed, which changes the width, and two widths that disagree about the
+  column count would re-chunk each other indefinitely.
+
+Both were confirmed by counting the rows actually parented in the panel after
+cycling the tile size through 96, 192, 240, 96 and 160. Before: five rows for a
+five-column layout, with `[300..304]` present **twice**. After: four rows, each
+consecutive. That duplicate is what reached the screen as a stray row — in the
+reported case entries 100 to 104, which is why the same five numbers appeared in
+two different screenshots.
+
+Chunking also stopped using `Skip`/`Take`, which walks the list from the start
+for every row and on forty thousand entries costs more than decoding the art.
+
 ### Decoding a screenful without thrashing
 
 A gallery realises about seventy tiles at once where the list realised fourteen,
