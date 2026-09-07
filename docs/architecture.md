@@ -26,7 +26,9 @@ GumpStudio.Rendering     SkiaSharp renderer, art cache, hit-test geometry.
 GumpStudio.Converters    Raw client layout, POL, RunUO and Sphere. Each one
         │                reads the layout IR and knows only its own syntax.
         │
-GumpStudio.App           Avalonia MVVM shell.
+GumpStudio.App           Avalonia shell. The panels around the canvas are
+                         Dock dockables, so the layout is the user's to
+                         arrange.
 GumpStudio.Cli           Headless tooling: dump art, convert files, run
                          converters without the UI.
 ```

@@ -16,6 +16,9 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Dock.Avalonia" />
+    <PackageReference Include="Dock.Model.Avalonia" />
+    <PackageReference Include="Dock.Avalonia.Themes.Fluent" />
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
@@ -39,8 +42,18 @@
     which an AOT image cannot load at all — hence a second registration route
     behind #if STATIC_PLUGINS, and two MSBuild copy targets to deploy them.
   -->
+  <!--
+    IL2104 and IL3053 are the per-assembly roll-ups for Dock. Its Fluent theme
+    binds a dockable's Title and CanClose by name rather than with compiled
+    bindings, and its container generator reflects over whatever an ItemsSource
+    hands it. Both are library code and neither is something this project can
+    annotate; the published binary is exercised by hand after a Dock bump. The
+    warnings that matter still fail the build: an assembly roll-up only covers
+    code shipped in a package, and this project's own IL2026 and IL3050 are
+    reported individually.
+  -->
   <PropertyGroup Condition="'$(PublishAot)' == 'true'">
-    <NoWarn>$(NoWarn);IL3051</NoWarn>
+    <NoWarn>$(NoWarn);IL3051;IL2104;IL3053</NoWarn>
   </PropertyGroup>
 
 </Project>

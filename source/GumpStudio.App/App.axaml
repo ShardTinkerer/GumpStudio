@@ -3,8 +3,24 @@
              x:Class="GumpStudio.App.App"
              RequestedThemeVariant="Dark">
 
+  <Application.Resources>
+    <!--
+      Dock rebuilds the control for a dockable whenever it is moved to another
+      dock. The panels are declared once in MainWindow.axaml and held by name,
+      so they have to be the same instances afterwards: recycling by dockable
+      id hands the existing control back instead of asking for a second one.
+    -->
+    <ControlRecycling x:Key="ControlRecyclingKey" TryToUseIdAsKey="True" />
+  </Application.Resources>
+
   <Application.Styles>
     <FluentTheme />
+    <DockFluentTheme />
+
+    <Style Selector="DockControl">
+      <Setter Property="(ControlRecyclingDataTemplate.ControlRecycling)"
+              Value="{StaticResource ControlRecyclingKey}" />
+    </Style>
 
     <Style Selector="ScrollBar">
       <Setter Property="AllowAutoHide" Value="False" />

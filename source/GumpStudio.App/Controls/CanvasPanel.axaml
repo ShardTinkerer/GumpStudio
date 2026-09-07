@@ -1,0 +1,16 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:GumpStudio.App.Controls"
+             x:Class="GumpStudio.App.Controls.CanvasPanel">
+
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="_pageTabs"
+                Background="#26262A" Spacing="2" />
+
+    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+      <controls:GumpCanvas Name="_canvas" Width="1024" Height="768"
+                           HorizontalAlignment="Left" VerticalAlignment="Top" />
+    </ScrollViewer>
+  </DockPanel>
+
+</UserControl>

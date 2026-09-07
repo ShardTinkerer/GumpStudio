@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="GumpStudio.App.Controls.PropertiesPanel">
+
+  <!--
+    AllowAutoHide off, and a right margin on the content to match. The Fluent
+    scroll bar floats over what it is scrolling by default, which put it on top
+    of the browse button at the end of an id row.
+  -->
+  <ScrollViewer AllowAutoHide="False"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled"
+                Padding="6">
+    <StackPanel Name="_rows" Spacing="4" Margin="0,0,10,0" />
+  </ScrollViewer>
+
+</UserControl>

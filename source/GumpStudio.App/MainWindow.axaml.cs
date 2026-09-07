@@ -12,6 +12,8 @@ using Avalonia.Threading;
 
 using CommunityToolkit.Mvvm.Input;
 
+using Dock.Model.Avalonia.Controls;
+
 using GumpStudio.App.Controls;
 using GumpStudio.Core.Commands;
 using GumpStudio.Core.Document;
@@ -69,11 +71,26 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         AvaloniaXamlLoader.Load(this);
 
-        _canvas = this.FindControl<GumpCanvas>("Canvas")!;
-        _elementList = this.FindControl<ListBox>("ElementList")!;
-        _propertyPanel = this.FindControl<StackPanel>("PropertyPanel")!;
-        _pageTabs = this.FindControl<StackPanel>("PageTabs")!;
-        _toolbox = this.FindControl<ItemsControl>("Toolbox")!;
+        CanvasPanel canvasPanel = new();
+        ToolboxPanel toolboxPanel = new();
+        ElementsPanel elementsPanel = new();
+        PropertiesPanel propertiesPanel = new();
+
+        // Dock asks its dockables for content, so the panels are handed over
+        // rather than looked up. Each is wrapped in the factory delegate Dock
+        // expects, closing over the one instance the window holds: a panel
+        // that came back rebuilt after a drag would leave every field here
+        // pointing at controls no longer on screen.
+        Fill("GumpDocument", canvasPanel);
+        Fill("ToolboxTool", toolboxPanel);
+        Fill("ElementsTool", elementsPanel);
+        Fill("PropertiesTool", propertiesPanel);
+
+        _canvas = canvasPanel.Canvas;
+        _pageTabs = canvasPanel.PageTabs;
+        _toolbox = toolboxPanel.Items;
+        _elementList = elementsPanel.List;
+        _propertyPanel = propertiesPanel.Rows;
         _status = this.FindControl<TextBlock>("StatusText")!;
         _exportMenu = this.FindControl<MenuItem>("MenuExport")!;
         _moveToPageMenu = this.FindControl<MenuItem>("MenuMoveToPage")!;
@@ -115,6 +132,29 @@ public sealed partial class MainWindow : Window, IDisposable
                 Guarded(() => _session.Open(startup));
             }
         };
+    }
+
+    /// <summary>Gives a dockable declared in the layout the view it shows.</summary>
+    private void Fill(string dockableName, Control view)
+    {
+        object content = new Func<IServiceProvider, object>(_ => view);
+
+        switch (this.FindNameScope()?.Find(dockableName))
+        {
+            case Tool tool:
+                tool.Content = content;
+
+                break;
+
+            case Document document:
+                document.Content = content;
+
+                break;
+
+            default:
+                throw new InvalidOperationException(
+                    $"The layout has no dockable named '{dockableName}'.");
+        }
     }
 
     private void WireMenus()

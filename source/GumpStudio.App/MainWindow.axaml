@@ -1,6 +1,5 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:controls="clr-namespace:GumpStudio.App.Controls"
         x:Class="GumpStudio.App.MainWindow"
         Title="GumpStudio"
         Width="1280" Height="860"
@@ -83,94 +82,63 @@
     </Border>
 
     <!--
-      Both side panels were fixed widths in a DockPanel, so nothing could be
-      widened when its contents did not fit. They are grid columns with
-      splitters now, each with a minimum so a panel cannot be dragged away
-      entirely.
+      The side panels are Dock tools rather than fixed grid columns, so each
+      one can be re-tabbed, stacked, floated or pinned away and the canvas
+      keeps the middle.
+
+      None of the tools carries its content here. Dock treats what a Tool holds
+      in XAML as a template it builds when the tab is first shown, which puts
+      the controls outside this window's name scope and out of reach of the
+      constructor. The panels are separate views, and the constructor hands
+      each one to its tool instead.
     -->
-    <Grid>
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="150" MinWidth="110" />
-        <ColumnDefinition Width="4" />
-        <ColumnDefinition Width="*" MinWidth="200" />
-        <ColumnDefinition Width="4" />
-        <ColumnDefinition Width="340" MinWidth="240" />
-      </Grid.ColumnDefinitions>
+    <DockControl x:Name="Layout" InitializeLayout="True" InitializeFactory="True">
 
-      <!-- Toolbox -->
-      <Border Grid.Column="0" Background="#26262A" Padding="6">
-        <DockPanel>
-          <TextBlock DockPanel.Dock="Top" Text="Toolbox" Foreground="#9A9AA0"
-                     FontWeight="Bold" Margin="2,2,2,6" />
-          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl Name="Toolbox">
-              <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                  <StackPanel Spacing="3" />
-                </ItemsPanelTemplate>
-              </ItemsControl.ItemsPanel>
-            </ItemsControl>
-          </ScrollViewer>
-        </DockPanel>
-      </Border>
+      <DockControl.Factory>
+        <Factory />
+      </DockControl.Factory>
 
-      <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="#1F1F23" />
+      <RootDock x:Name="Root" Id="Root" IsCollapsable="False"
+                DefaultDockable="{Binding #MainLayout}">
 
-      <!-- Pages + canvas -->
-      <DockPanel Grid.Column="2">
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="PageTabs"
-                    Background="#26262A" Spacing="2" />
+        <ProportionalDock x:Name="MainLayout" Id="MainLayout" Orientation="Horizontal">
 
-        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-          <controls:GumpCanvas Name="Canvas" Width="1024" Height="768"
-                               HorizontalAlignment="Left" VerticalAlignment="Top" />
-        </ScrollViewer>
-      </DockPanel>
-
-      <GridSplitter Grid.Column="3" ResizeDirection="Columns" Background="#1F1F23" />
-
-      <!-- Element list and properties -->
-      <Border Grid.Column="4" Background="#26262A" Padding="6">
-        <Grid>
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" MinHeight="70" />
-            <RowDefinition Height="4" />
-            <!-- The properties header lives inside this row rather than in one
-                 of its own: a splitter resizes the rows either side of it, and
-                 an Auto header between them would be what got resized. -->
-            <RowDefinition Height="2*" MinHeight="120" />
-          </Grid.RowDefinitions>
-
-          <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="2,2,2,6" Spacing="6">
-            <TextBlock Text="Elements" Foreground="#9A9AA0" FontWeight="Bold" />
-            <!-- Drawing order is the list order, and it is not obvious which end
-                 is which until something is hidden behind something else. -->
-            <TextBlock Text="back → front" Foreground="#6A6A70" VerticalAlignment="Center" />
-          </StackPanel>
-
-          <ListBox Grid.Row="1" Name="ElementList" Background="#1F1F23" />
-
-          <GridSplitter Grid.Row="2" ResizeDirection="Rows" Background="#1F1F23" />
-
-          <DockPanel Grid.Row="3">
-            <TextBlock DockPanel.Dock="Top" Text="Properties" Foreground="#9A9AA0"
-                       FontWeight="Bold" Margin="2,8,2,6" />
-
+          <ToolDock x:Name="ToolboxPane" Id="ToolboxPane" Proportion="0.13" Alignment="Left">
             <!--
-              AllowAutoHide off, and a right margin on the content to match.
-              The Fluent scroll bar floats over what it is scrolling by default,
-              which put it on top of the browse button at the end of an id row.
+              Nothing here can be closed. Closing a tool hides it, and no menu
+              brings one back yet, so a stray click on a tab's close button
+              would cost a panel for the rest of the session.
             -->
-            <ScrollViewer AllowAutoHide="False"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-              <StackPanel Name="PropertyPanel" Spacing="4" Margin="0,0,10,0" />
-            </ScrollViewer>
-          </DockPanel>
-        </Grid>
-      </Border>
-    </Grid>
+            <Tool x:Name="ToolboxTool" Id="ToolboxTool" Title="Toolbox" CanClose="False" />
+          </ToolDock>
+
+          <ProportionalDockSplitter x:Name="LeftSplitter" Id="LeftSplitter" />
+
+          <DocumentDock x:Name="CanvasPane" Id="CanvasPane" Proportion="0.6"
+                        CanCreateDocument="False" IsCollapsable="False">
+            <Document x:Name="GumpDocument" Id="GumpDocument" Title="Gump" CanClose="False" />
+          </DocumentDock>
+
+          <ProportionalDockSplitter x:Name="RightSplitter" Id="RightSplitter" />
+
+          <ProportionalDock x:Name="RightPane" Id="RightPane" Orientation="Vertical" Proportion="0.27">
+
+            <ToolDock x:Name="ElementsPane" Id="ElementsPane" Proportion="0.35" Alignment="Right">
+              <Tool x:Name="ElementsTool" Id="ElementsTool" Title="Elements" CanClose="False" />
+            </ToolDock>
+
+            <ProportionalDockSplitter x:Name="PropertiesSplitter" Id="PropertiesSplitter" />
+
+            <ToolDock x:Name="PropertiesPane" Id="PropertiesPane" Proportion="0.65" Alignment="Right">
+              <Tool x:Name="PropertiesTool" Id="PropertiesTool" Title="Properties" CanClose="False" />
+            </ToolDock>
+
+          </ProportionalDock>
+
+        </ProportionalDock>
+      </RootDock>
+
+    </DockControl>
 
   </DockPanel>
 </Window>

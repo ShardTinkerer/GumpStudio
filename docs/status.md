@@ -1003,6 +1003,49 @@ capture. Repeated problems also collapse to one warning with a count: a capture
 can carry dozens of the same line, and forty near-identical warnings bury the one
 that matters.
 
+### Panels that go where you want them
+
+The shell was a `Grid` of fixed columns: toolbox left, canvas centre, element
+list and properties stacked on the right, with splitters between them. The
+proportions were adjustable and nothing else was — a panel could not be moved,
+tabbed with another, torn off onto a second monitor, or collapsed out of the way
+while laying out a wide gump.
+
+[Dock](https://github.com/wieslawsoltes/Dock) replaces that grid. The four
+panels are dockables inside a `DockControl` declared in `MainWindow.axaml`: the
+gump is a document in the centre, and the toolbox, element list and properties
+are tools that can be dragged into any edge, tabbed together, pinned to a strip,
+or floated into their own window. Dock is MIT-licensed and ships a build for the
+Avalonia version this uses.
+
+None of the panels can be closed. Closing a tool hides it, and nothing brings
+one back yet, so a stray click on a tab's close button would cost a panel for
+the rest of the session.
+
+The panels moved out of `MainWindow.axaml` into four views — `CanvasPanel`,
+`ToolboxPanel`, `ElementsPanel` and `PropertiesPanel` — because Dock treats what
+a dockable holds in XAML as a template it builds when the tab is first shown.
+That puts the controls in their own name scope, created at a time the window
+constructor cannot wait for, and `FindControl` for `Canvas` or `ElementList`
+found nothing. The constructor now builds each view itself and hands it to its
+dockable as the content factory Dock asks for, closing over the one instance, so
+the fields it keeps always point at controls that are really on screen.
+
+Reparenting relies on control recycling, registered in `App.axaml` and keyed on
+the dockable's id. Without it Dock asks for content again after every move and
+gets the same control a second time, which cannot be in two places at once. With
+it a tool dragged to another dock — or out into a floating window — carries the
+live panel across, selection and scroll position intact.
+
+The NativeAOT publish needed one accommodation. Dock's Fluent theme binds a
+dockable's title and close button by name rather than with compiled bindings,
+and its container generator reflects over whatever an `ItemsSource` gives it, so
+ILC rolls all three Dock assemblies up into `IL2104`/`IL3053` — which
+`TreatWarningsAsErrors` then turns into a failed publish. They are suppressed
+for the AOT publish only. The published binary was run afterwards: the layout,
+the tab titles and the floating windows all behave as they do in a normal build,
+which is what those bindings drive.
+
 ## Defect inventory
 
 Verified findings from the audit of `src/`, kept as a regression checklist.
@@ -1227,6 +1270,11 @@ model; quinted is the reference for the POL exporter.**
 
 ## Known gaps
 
+- **The dock layout is not remembered between sessions.** Panels can be moved,
+  tabbed and floated, but the window opens on the layout declared in
+  `MainWindow.axaml` every time. Dock serialises its model; wiring that up means
+  reattaching each panel to its dockable by id after a restore, and a way back
+  to the default when a saved layout is unusable.
 - **The BWT decoder is only covered by real-client tests**, so CI does not
   exercise it. Closing this needs either a BWT encoder written purely for test
   fixtures, or a small captured byte pair checked in.

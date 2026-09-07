@@ -1,0 +1,14 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="GumpStudio.App.Controls.ElementsPanel">
+
+  <DockPanel>
+    <!-- Drawing order is the list order, and it is not obvious which end is
+         which until something is hidden behind something else. -->
+    <TextBlock DockPanel.Dock="Top" Text="back &#8594; front" Foreground="#6A6A70"
+               Margin="8,6,8,4" />
+
+    <ListBox Name="_list" Background="#1F1F23" Margin="6,0,6,6" />
+  </DockPanel>
+
+</UserControl>
