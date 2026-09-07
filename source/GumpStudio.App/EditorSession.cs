@@ -1,6 +1,7 @@
 using GumpStudio.Core.Commands;
 using GumpStudio.Core.Document;
 using GumpStudio.Core.Editing;
+using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
 using GumpStudio.Core.Serialization;
 using GumpStudio.Converters;
@@ -24,12 +25,37 @@ public sealed class EditorSession : IDisposable
     private UoArtSource? _art;
     private GumpDocument _document = new();
     private int _activePageIndex;
+    private long _savedStateId;
 
     public EditorSession()
+        : this(AppSettings.Load())
     {
+    }
+
+    /// <param name="settings">
+    /// The settings this session reads and writes. Injected so a test can point
+    /// at a scratch file instead of the real one in the application-data folder.
+    /// </param>
+    public EditorSession(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        Settings = settings;
         History = new UndoHistory();
         Canvas = new CanvasInteractionController(History) { Page = _document.Pages[0] };
+
+        History.Changed += (_, _) => ModifiedChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>
+    /// User preferences, loaded once and shared by every window.
+    /// </summary>
+    /// <remarks>
+    /// One instance rather than a static read before each write: the editor used
+    /// to reload the file at eight separate call sites, and one of them saved a
+    /// freshly constructed instance, which silently reset every other setting.
+    /// </remarks>
+    public AppSettings Settings { get; }
 
     public GumpDocument Document => _document;
 
@@ -74,6 +100,20 @@ public sealed class EditorSession : IDisposable
 
     public event EventHandler? PageChanged;
 
+    /// <summary>Raised when <see cref="IsModified"/> changes.</summary>
+    public event EventHandler? ModifiedChanged;
+
+    /// <summary>
+    /// Whether the document differs from what was last saved or opened.
+    /// </summary>
+    /// <remarks>
+    /// Derived from the undo history rather than a flag set by each mutation,
+    /// so undoing back to the saved state reports clean again. It is only
+    /// honest because every change to the document goes through the history —
+    /// adding and removing a page used to bypass it.
+    /// </remarks>
+    public bool IsModified => History.StateId != _savedStateId;
+
     /// <summary>Opens a client installation, replacing any already loaded.</summary>
     /// <returns>The files that were missing, or empty on success.</returns>
     public IReadOnlyList<string> OpenClient(string clientPath)
@@ -85,17 +125,57 @@ public sealed class EditorSession : IDisposable
             return missing;
         }
 
-        // Replacing rather than mutating is what lets the client path change
-        // without restarting, which the old application could not do.
+        Adopt(UoDataContext.Open(clientPath));
+
+        return [];
+    }
+
+    /// <summary>
+    /// Opens a client installation without blocking the caller's thread.
+    /// </summary>
+    /// <returns>The files that were missing, or empty on success.</returns>
+    /// <remarks>
+    /// Opening a client reads the hue table, the tile data, the cliloc table and
+    /// up to thirteen font files, and walks every index of every UOP container.
+    /// It ran on the UI thread, so the window was frozen for the whole of it —
+    /// including at startup, before anything had been drawn.
+    ///
+    /// Only the reading moves off the thread. The context and the art source are
+    /// adopted, and <see cref="DocumentChanged"/> raised, back on the caller's
+    /// context, so nothing that listens has to think about threads.
+    /// </remarks>
+    public async Task<IReadOnlyList<string>> OpenClientAsync(string clientPath)
+    {
+        IReadOnlyList<string> missing =
+            await Task.Run(() => UoDataContext.Validate(clientPath)).ConfigureAwait(true);
+
+        if (missing.Count > 0)
+        {
+            return missing;
+        }
+
+        UoDataContext opened =
+            await Task.Run(() => UoDataContext.Open(clientPath)).ConfigureAwait(true);
+
+        Adopt(opened);
+
+        return [];
+    }
+
+    /// <summary>Takes over a freshly opened client, releasing any previous one.</summary>
+    /// <remarks>
+    /// Replacing rather than mutating is what lets the client path change
+    /// without restarting, which the old application could not do.
+    /// </remarks>
+    private void Adopt(UoDataContext data)
+    {
         _art?.Dispose();
         _data?.Dispose();
 
-        _data = UoDataContext.Open(clientPath);
-        _art = new UoArtSource(_data);
+        _data = data;
+        _art = new UoArtSource(data);
 
         DocumentChanged?.Invoke(this, EventArgs.Empty);
-
-        return [];
     }
 
     public void NewDocument() => Replace(new GumpDocument(), null);
@@ -112,6 +192,26 @@ public sealed class EditorSession : IDisposable
     }
 
     /// <summary>
+    /// Imports a 1.8 <c>.gumpling</c> as a group on the active page.
+    /// </summary>
+    /// <returns>The group that was added.</returns>
+    /// <remarks>
+    /// A gumpling is one saved group, not a document, so it is added to what is
+    /// open rather than replacing it — and it goes through the undo history like
+    /// any other insertion. The import picker offered <c>*.gumpling</c> long
+    /// before anything could read one: every such file went to
+    /// <see cref="ImportLegacy"/>, which only understands a whole document.
+    /// </remarks>
+    public GroupElement ImportGumpling(string path)
+    {
+        GroupElement group = Core.Legacy.LegacyGumpImporter.ImportGumpling(path);
+
+        Apply(new AddElementCommand(ActivePage.Root, group));
+
+        return group;
+    }
+
+    /// <summary>
     /// Adopts a document imported from captured layout text.
     /// </summary>
     /// <remarks>
@@ -123,7 +223,18 @@ public sealed class EditorSession : IDisposable
     public void Save(string path)
     {
         GumpXmlSerializer.Save(_document, path);
+
         DocumentPath = path;
+
+        MarkSaved();
+    }
+
+    /// <summary>Treats the current state as the saved one.</summary>
+    private void MarkSaved()
+    {
+        _savedStateId = History.StateId;
+
+        ModifiedChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Applies an undoable change to the document.</summary>
@@ -154,6 +265,8 @@ public sealed class EditorSession : IDisposable
 
         Canvas.Page = document.Pages[0];
         History.Clear();
+
+        MarkSaved();
 
         MeasureActivePage();
 

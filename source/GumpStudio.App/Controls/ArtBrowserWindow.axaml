@@ -30,25 +30,22 @@
       <Button Name="AcceptButton" Content="Select" MinWidth="90" IsDefault="True" />
     </StackPanel>
 
-    <!-- Preview -->
-    <Border DockPanel.Dock="Right" Width="260" Margin="8,0,0,0"
-            BorderBrush="#40FFFFFF" BorderThickness="1" Padding="8">
-      <DockPanel>
-        <TextBlock DockPanel.Dock="Top" Name="PreviewTitle" Text="Nothing selected"
-                   FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,4" />
-        <TextBlock DockPanel.Dock="Top" Name="PreviewDetail" Foreground="Gray"
-                   TextWrapping="Wrap" Margin="0,0,0,8" />
-        <Border Background="#20000000">
-          <Image Name="PreviewImage" Stretch="None"
-                 HorizontalAlignment="Center" VerticalAlignment="Center"
-                 RenderOptions.BitmapInterpolationMode="None" />
-        </Border>
-      </DockPanel>
-    </Border>
+    <!--
+      The list and the preview share a grid with a splitter between them rather
+      than the preview being docked at a fixed width. Gump art runs to several
+      hundred pixels across, so which of the two needs the room depends entirely
+      on what is being looked at.
+    -->
+    <Grid Name="Panes">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" MinWidth="200" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="260" MinWidth="160" />
+      </Grid.ColumnDefinitions>
 
-    <!-- Results -->
-    <Border BorderBrush="#40FFFFFF" BorderThickness="1">
-      <ListBox Name="Results" SelectionMode="Single">
+      <!-- Results -->
+      <Border Grid.Column="0" BorderBrush="#40FFFFFF" BorderThickness="1">
+        <ListBox Name="Results" SelectionMode="Single">
 
         <!-- In gallery mode a list item is a whole row of tiles, so the row's
              own hover and selection highlight spans seven unrelated pieces of
@@ -66,13 +63,41 @@
           </Style>
         </ListBox.Styles>
 
-        <ListBox.ItemsPanel>
-          <ItemsPanelTemplate>
-            <VirtualizingStackPanel Orientation="Vertical" />
-          </ItemsPanelTemplate>
-        </ListBox.ItemsPanel>
-      </ListBox>
-    </Border>
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate>
+              <VirtualizingStackPanel Orientation="Vertical" />
+            </ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+        </ListBox>
+      </Border>
+
+      <GridSplitter Grid.Column="1" Name="PreviewSplitter" Width="6"
+                    ResizeDirection="Columns" Background="Transparent"
+                    ToolTip.Tip="Drag to give the preview more room." />
+
+      <!-- Preview -->
+      <Border Grid.Column="2" BorderBrush="#40FFFFFF" BorderThickness="1" Padding="8">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Name="PreviewTitle" Text="Nothing selected"
+                     FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,4" />
+          <TextBlock DockPanel.Dock="Top" Name="PreviewDetail" Foreground="Gray"
+                     TextWrapping="Wrap" Margin="0,0,0,8" />
+          <Border Background="#20000000">
+            <!--
+              Uniform and DownOnly, not None. At native size anything wider than
+              the pane was simply cropped, so a wide gump could not be seen whole
+              however the window was arranged. Art that already fits is still
+              drawn pixel for pixel, and nearest-neighbour keeps what is scaled
+              from turning into a blur.
+            -->
+            <Image Name="PreviewImage" Stretch="Uniform" StretchDirection="DownOnly"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   RenderOptions.BitmapInterpolationMode="None" />
+          </Border>
+        </DockPanel>
+      </Border>
+
+    </Grid>
 
   </DockPanel>
 </Window>

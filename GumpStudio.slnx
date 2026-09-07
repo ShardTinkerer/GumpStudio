@@ -15,6 +15,7 @@
     <Project Path="tests/GumpStudio.Core.Tests/GumpStudio.Core.Tests.csproj" />
     <Project Path="tests/GumpStudio.Rendering.Tests/GumpStudio.Rendering.Tests.csproj" />
     <Project Path="tests/GumpStudio.Converters.Tests/GumpStudio.Converters.Tests.csproj" />
+    <Project Path="tests/GumpStudio.App.Tests/GumpStudio.App.Tests.csproj" />
   </Folder>
 
   <Folder Name="/solution items/">

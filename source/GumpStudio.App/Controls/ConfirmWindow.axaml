@@ -1,0 +1,22 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.ConfirmWindow"
+        Title="GumpStudio"
+        Width="400" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel Margin="16" Spacing="14">
+
+    <TextBlock Name="MessageText" TextWrapping="Wrap" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <!-- Cancel is the default and the escape route: the question is only ever
+           asked when the alternative discards work. -->
+      <Button Name="CancelButton" Content="Cancel" MinWidth="90"
+              IsDefault="True" IsCancel="True" />
+      <Button Name="AcceptButton" Content="Discard" MinWidth="90" />
+    </StackPanel>
+
+  </StackPanel>
+</Window>

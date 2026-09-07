@@ -33,11 +33,29 @@ public sealed class GumpCanvas : Control, IDisposable
     private EditorSession? _session;
     private int _surfaceWidth;
     private int _surfaceHeight;
+    private double _surfaceScaling;
+
+    // Rebuilt only when the art source changes. It was allocated per frame,
+    // along with the options record and the backdrop brush.
+    private GumpRenderer? _renderer;
+    private IGumpArtSource? _rendererArt;
+
+    private GumpRenderOptions? _options;
+    private bool _optionsShowSharedPage;
+    private GridSettings? _optionsGrid;
+
+    /// <summary>The empty space around the gump. A constant, so it is shared.</summary>
+    private static readonly IBrush Backdrop = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2E));
 
     public GumpCanvas()
     {
         Focusable = true;
         ClipToBounds = true;
+
+        // Sized here rather than in markup, so the zoom is the only thing that
+        // decides how large the surface is.
+        Width = DesignWidth;
+        Height = DesignHeight;
     }
 
     /// <summary>The session whose active page is drawn.</summary>
@@ -65,6 +83,10 @@ public sealed class GumpCanvas : Control, IDisposable
                 _session.Canvas.Changed += OnSessionChanged;
                 _session.PageChanged += OnSessionChanged;
                 _session.DocumentChanged += OnSessionChanged;
+
+                // The session is attached after construction, so it has to be
+                // told the handle size the current zoom implies.
+                _session.Canvas.HandleSize = HandleSizeForZoom(_zoom);
             }
 
             InvalidateVisual();
@@ -80,8 +102,107 @@ public sealed class GumpCanvas : Control, IDisposable
     /// </remarks>
     public bool ShowSharedPage { get; set; } = true;
 
+    /// <summary>The design area, in gump units, before zoom.</summary>
+    /// <remarks>
+    /// A gump has no intrinsic canvas size — the client draws wherever an
+    /// element is placed — so the editor offers a fixed area to lay one out in,
+    /// as the original did.
+    /// </remarks>
+    public const int DesignWidth = 1024;
+
+    public const int DesignHeight = 768;
+
+    /// <summary>Smallest and largest zoom the editor offers.</summary>
+    public const double MinZoom = 0.25;
+
+    public const double MaxZoom = 4.0;
+
+    private double _zoom = 1.0;
+
+    /// <summary>
+    /// How magnified the design surface is.
+    /// </summary>
+    /// <remarks>
+    /// Gump art is pixel art at a fixed size, so the client shows it one art
+    /// pixel to one screen pixel and so does this by default. Zoom exists for
+    /// the two things that are otherwise awkward: placing something precisely,
+    /// and seeing a gump wider than the window.
+    ///
+    /// Everything below the canvas keeps working in gump units. Only
+    /// <see cref="ToGump"/> and the render transform know about the factor, and
+    /// the decoration sizes are divided by it so handles stay the same size
+    /// under the pointer at every zoom.
+    /// </remarks>
+    public double Zoom
+    {
+        get => _zoom;
+        set
+        {
+            double clamped = Math.Clamp(value, MinZoom, MaxZoom);
+
+            if (Math.Abs(clamped - _zoom) < 0.0001)
+            {
+                return;
+            }
+
+            _zoom = clamped;
+
+            ApplyZoom();
+
+            ZoomChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
     /// <summary>Raised after a gesture changes the selection or geometry.</summary>
     public event EventHandler? InteractionChanged;
+
+    /// <summary>Raised after <see cref="Zoom"/> changes.</summary>
+    public event EventHandler? ZoomChanged;
+
+    /// <summary>
+    /// Sizes the control for the current zoom and tells the session how big a
+    /// handle now has to be.
+    /// </summary>
+    private void ApplyZoom()
+    {
+        Width = DesignWidth * _zoom;
+        Height = DesignHeight * _zoom;
+
+        if (_session is not null)
+        {
+            _session.Canvas.HandleSize = HandleSizeForZoom(_zoom);
+        }
+
+        _options = null;
+
+        InvalidateVisual();
+    }
+
+    /// <summary>
+    /// A handle's side in gump units, so that it is
+    /// <see cref="HandleGeometry.HandleSize"/> pixels on screen.
+    /// </summary>
+    /// <remarks>
+    /// Rounded up and forced odd, because a handle is centred on its corner by
+    /// integer halving: an even side would sit half a pixel off.
+    /// </remarks>
+    private static int HandleSizeForZoom(double zoom)
+    {
+        int size = (int)Math.Ceiling(HandleGeometry.HandleSize / zoom);
+
+        return size % 2 == 0 ? size + 1 : size;
+    }
+
+    /// <summary>Sets the zoom so the whole design area fits a viewport.</summary>
+    public void ZoomToFit(Size viewport)
+    {
+        if (viewport.Width <= 0 || viewport.Height <= 0)
+        {
+            return;
+        }
+
+        Zoom = Math.Min(viewport.Width / DesignWidth, viewport.Height / DesignHeight);
+    }
 
     public override void Render(DrawingContext context)
     {
@@ -92,14 +213,20 @@ public sealed class GumpCanvas : Control, IDisposable
         int width = Math.Max(1, (int)Bounds.Width);
         int height = Math.Max(1, (int)Bounds.Height);
 
-        context.FillRectangle(new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2E)), Bounds);
+        context.FillRectangle(Backdrop, Bounds);
 
         if (_session?.Art is not { } art)
         {
             return;
         }
 
-        EnsureSurface(width, height);
+        // The surface is allocated in device pixels and the drawing scaled to
+        // match, so a gump stays sharp on a scaled display. It used to be
+        // allocated at the logical size and stamped 96 dpi regardless, which
+        // under-sampled everything at any scaling above 100%.
+        double scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
+
+        EnsureSurface(width, height, scaling);
 
         if (_surface is null)
         {
@@ -108,23 +235,22 @@ public sealed class GumpCanvas : Control, IDisposable
 
         using (ILockedFramebuffer buffer = _surface.Lock())
         {
-            SKImageInfo info = new(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+            SKImageInfo info = new(
+                buffer.Size.Width, buffer.Size.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
 
             using SKSurface skia = SKSurface.Create(info, buffer.Address, buffer.RowBytes);
 
             skia.Canvas.Clear(SKColors.Transparent);
 
-            new GumpRenderer(art).RenderDocument(
+            // Everything below draws in gump units; this is the only place that
+            // knows about device pixels or magnification.
+            skia.Canvas.Scale((float)(scaling * _zoom));
+
+            RendererFor(art).RenderDocument(
                 skia.Canvas,
                 _session.Document,
                 _session.ActivePageIndex,
-                new GumpRenderOptions
-                {
-                    DrawSelection = true,
-                    DrawGroupOutlines = true,
-                    ShowSharedPage = ShowSharedPage,
-                    Grid = _session.Canvas.Grid,
-                });
+                CurrentOptions());
 
             DrawMarquee(skia.Canvas);
 
@@ -132,6 +258,53 @@ public sealed class GumpCanvas : Control, IDisposable
         }
 
         context.DrawImage(_surface, new Rect(0, 0, width, height));
+    }
+
+    private GumpRenderer RendererFor(IGumpArtSource art)
+    {
+        if (_renderer is null || !ReferenceEquals(_rendererArt, art))
+        {
+            _renderer = new GumpRenderer(art);
+            _rendererArt = art;
+        }
+
+        return _renderer;
+    }
+
+    /// <summary>
+    /// The render options for this frame, reused while nothing about them moves.
+    /// </summary>
+    /// <remarks>
+    /// <c>RenderOptions</c> is an immutable record, so holding one is safe; the
+    /// grid is compared by reference because the session mutates the same
+    /// instance in place, which is also why its values are re-read below.
+    /// </remarks>
+    private GumpRenderOptions CurrentOptions()
+    {
+        GridSettings grid = _session!.Canvas.Grid;
+
+        if (_options is null
+            || _optionsShowSharedPage != ShowSharedPage
+            || !ReferenceEquals(_optionsGrid, grid))
+        {
+            _options = new GumpRenderOptions
+            {
+                DrawSelection = true,
+                DrawGroupOutlines = true,
+                ShowSharedPage = ShowSharedPage,
+                Grid = grid,
+                HandleSize = HandleSizeForZoom(_zoom),
+
+                // A hairline: one device pixel whatever the transform, which is
+                // what an outline around pixel art wants at every zoom.
+                OutlineWidth = 0,
+            };
+
+            _optionsShowSharedPage = ShowSharedPage;
+            _optionsGrid = grid;
+        }
+
+        return _options;
     }
 
     private void DrawMarquee(SKCanvas canvas)
@@ -155,9 +328,20 @@ public sealed class GumpCanvas : Control, IDisposable
         canvas.DrawRect(rect, stroke);
     }
 
-    private void EnsureSurface(int width, int height)
+    /// <summary>
+    /// Allocates the backing bitmap for a logical size at a display scaling.
+    /// </summary>
+    /// <remarks>
+    /// The bitmap declares its dpi as 96 times the scaling, so Avalonia reports
+    /// its size in the same logical units the caller passed and the blit stays
+    /// one device pixel to one bitmap pixel.
+    /// </remarks>
+    private void EnsureSurface(int width, int height, double scaling)
     {
-        if (_surface is not null && _surfaceWidth == width && _surfaceHeight == height)
+        if (_surface is not null
+            && _surfaceWidth == width
+            && _surfaceHeight == height
+            && _surfaceScaling == scaling)
         {
             return;
         }
@@ -165,13 +349,16 @@ public sealed class GumpCanvas : Control, IDisposable
         _surface?.Dispose();
 
         _surface = new WriteableBitmap(
-            new PixelSize(width, height),
-            new Vector(96, 96),
+            new PixelSize(
+                Math.Max(1, (int)Math.Ceiling(width * scaling)),
+                Math.Max(1, (int)Math.Ceiling(height * scaling))),
+            new Vector(96 * scaling, 96 * scaling),
             PixelFormat.Bgra8888,
             AlphaFormat.Premul);
 
         _surfaceWidth = width;
         _surfaceHeight = height;
+        _surfaceScaling = scaling;
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -280,7 +467,8 @@ public sealed class GumpCanvas : Control, IDisposable
                 continue;
             }
 
-            DragMode handle = HandleGeometry.HitTest(selected.GetAbsoluteBounds(), at, resizable: true);
+            DragMode handle = HandleGeometry.HitTest(
+                selected.GetAbsoluteBounds(), at, resizable: true, _session.Canvas.HandleSize);
 
             if (HandleGeometry.IsResize(handle))
             {
@@ -295,27 +483,51 @@ public sealed class GumpCanvas : Control, IDisposable
             mode = DragMode.Move;
         }
 
+        if (mode == _cursorMode)
+        {
+            return;
+        }
+
+        _cursorMode = mode;
         Cursor = CursorFor(mode);
     }
 
-    private static Cursor CursorFor(DragMode mode) => new(mode switch
+    /// <summary>
+    /// The pointer shape for a gesture, from a fixed set.
+    /// </summary>
+    /// <remarks>
+    /// Shared instances, and only assigned when the mode actually changes. A
+    /// <see cref="Cursor"/> owns a platform handle, and this used to construct
+    /// a fresh one on every pointer-move event and never dispose it.
+    /// </remarks>
+    private static Cursor CursorFor(DragMode mode) => mode switch
     {
-        DragMode.ResizeLeft or DragMode.ResizeRight => StandardCursorType.SizeWestEast,
-        DragMode.ResizeTop or DragMode.ResizeBottom => StandardCursorType.SizeNorthSouth,
+        DragMode.ResizeLeft or DragMode.ResizeRight => WestEast,
+        DragMode.ResizeTop or DragMode.ResizeBottom => NorthSouth,
 
         // Avalonia names the diagonals after the corner pair they span.
-        DragMode.ResizeTopLeft or DragMode.ResizeBottomRight => StandardCursorType.TopLeftCorner,
-        DragMode.ResizeTopRight or DragMode.ResizeBottomLeft => StandardCursorType.TopRightCorner,
+        DragMode.ResizeTopLeft or DragMode.ResizeBottomRight => TopLeftCorner,
+        DragMode.ResizeTopRight or DragMode.ResizeBottomLeft => TopRightCorner,
 
-        DragMode.Move => StandardCursorType.SizeAll,
-        _ => StandardCursorType.Arrow,
-    });
+        DragMode.Move => SizeAll,
+        _ => Cursor.Default,
+    };
+
+    private static readonly Cursor WestEast = new(StandardCursorType.SizeWestEast);
+    private static readonly Cursor NorthSouth = new(StandardCursorType.SizeNorthSouth);
+    private static readonly Cursor TopLeftCorner = new(StandardCursorType.TopLeftCorner);
+    private static readonly Cursor TopRightCorner = new(StandardCursorType.TopRightCorner);
+    private static readonly Cursor SizeAll = new(StandardCursorType.SizeAll);
+
+    // What CursorFor was last asked for, so an unchanged mode costs nothing.
+    private DragMode _cursorMode = DragMode.None;
 
     protected override void OnPointerExited(PointerEventArgs e)
     {
         base.OnPointerExited(e);
 
         // Leave the pointer as the caller found it once it is off the canvas.
+        _cursorMode = DragMode.None;
         Cursor = Cursor.Default;
     }
 
@@ -364,18 +576,17 @@ public sealed class GumpCanvas : Control, IDisposable
         // replaces the original's unused acceleration setting.
         int step = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : 1;
 
+        // Delete and Ctrl+A are deliberately absent: the window binds both, and
+        // an Avalonia window KeyBinding fires even over a key an inner control
+        // has marked handled, so having them here too ran each twice. What
+        // remains is what only the canvas offers.
         switch (e.Key)
         {
             case Key.Left: _session.Canvas.Nudge(-step, 0); break;
             case Key.Right: _session.Canvas.Nudge(step, 0); break;
             case Key.Up: _session.Canvas.Nudge(0, -step); break;
             case Key.Down: _session.Canvas.Nudge(0, step); break;
-            case Key.Delete: _session.Canvas.DeleteSelection(); break;
             case Key.Escape: _session.Canvas.CancelGesture(); break;
-
-            case Key.A when e.KeyModifiers.HasFlag(KeyModifiers.Control):
-                _session.Canvas.SelectAll();
-                break;
 
             default:
                 return;
@@ -394,7 +605,16 @@ public sealed class GumpCanvas : Control, IDisposable
         _surface = null;
     }
 
-    private static GumpPoint ToGump(Point position) => new((int)position.X, (int)position.Y);
+    /// <summary>
+    /// Maps a pointer position to gump coordinates.
+    /// </summary>
+    /// <remarks>
+    /// The floor is deliberate: a gump coordinate names a pixel, and a press
+    /// anywhere within that pixel belongs to it.
+    /// </remarks>
+    private GumpPoint ToGump(Point position) => new(
+        (int)Math.Floor(position.X / _zoom),
+        (int)Math.Floor(position.Y / _zoom));
 
     private static InputModifiers ToModifiers(KeyModifiers modifiers) =>
         modifiers.HasFlag(KeyModifiers.Control) || modifiers.HasFlag(KeyModifiers.Shift)

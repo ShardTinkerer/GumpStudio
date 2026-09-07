@@ -23,7 +23,7 @@
         <MenuItem Header="E_xit" Name="MenuExit" />
       </MenuItem>
 
-      <MenuItem Header="_Edit">
+      <MenuItem Header="_Edit" Name="MenuEditRoot">
         <MenuItem Header="_Undo" Name="MenuUndo" InputGesture="Ctrl+Z" />
         <MenuItem Header="_Redo" Name="MenuRedo" InputGesture="Ctrl+Y" />
         <Separator />
@@ -41,7 +41,7 @@
         <MenuItem Header="Send back_ward" Name="MenuSendBackward" InputGesture="Ctrl+Down" />
         <MenuItem Header="Send to _back" Name="MenuSendToBack" InputGesture="Ctrl+Shift+Down" />
         <Separator />
-        <MenuItem Header="_Arrange">
+        <MenuItem Header="_Arrange" Name="MenuArrange">
           <MenuItem Header="Align _lefts" Name="MenuAlignLeft" />
           <MenuItem Header="Align _rights" Name="MenuAlignRight" />
           <MenuItem Header="Align _tops" Name="MenuAlignTop" />
@@ -62,6 +62,26 @@
         <MenuItem Header="Show _grid" Name="MenuShowGrid" ToggleType="CheckBox" />
         <MenuItem Header="_Snap to grid" Name="MenuSnapToGrid" ToggleType="CheckBox" />
         <MenuItem Header="Grid _size…" Name="MenuGridSize" />
+        <Separator />
+        <MenuItem Header="Zoom _in" Name="MenuZoomIn" InputGesture="Ctrl+OemPlus" />
+        <MenuItem Header="Zoom _out" Name="MenuZoomOut" InputGesture="Ctrl+OemMinus" />
+        <MenuItem Header="_Actual size" Name="MenuZoomReset" InputGesture="Ctrl+D0" />
+        <MenuItem Header="_Fit to window" Name="MenuZoomFit" />
+        <Separator />
+        <!--
+          Hiding and showing a panel lives here rather than on the tab's close
+          button: Dock's close removes a dockable from its owner outright, so
+          nothing could bring it back, while hide stores it on the root for
+          RestoreDockable to find.
+        -->
+        <MenuItem Header="_Toolbox panel" Name="MenuPanelToolbox"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <MenuItem Header="_Elements panel" Name="MenuPanelElements"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <MenuItem Header="_Properties panel" Name="MenuPanelProperties"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <Separator />
+        <MenuItem Header="_Reset panel layout" Name="MenuResetLayout" />
       </MenuItem>
 
       <MenuItem Header="_Gump">
@@ -70,7 +90,9 @@
 
       <MenuItem Header="_Page" Name="MenuPageRoot">
         <MenuItem Header="_Add page" Name="MenuAddPage" />
+        <MenuItem Header="_Insert page here" Name="MenuInsertPage" />
         <MenuItem Header="_Remove page" Name="MenuRemovePage" />
+        <MenuItem Header="_Clear page" Name="MenuClearPage" />
         <Separator />
         <MenuItem Header="_Move selection to page" Name="MenuMoveToPage" />
       </MenuItem>

@@ -1,6 +1,8 @@
 using System.Globalization;
 
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Platform;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -12,7 +14,9 @@ using Avalonia.Threading;
 
 using CommunityToolkit.Mvvm.Input;
 
+using Dock.Avalonia.Controls;
 using Dock.Model.Avalonia.Controls;
+using Dock.Model.Core;
 
 using GumpStudio.App.Controls;
 using GumpStudio.Core.Commands;
@@ -26,9 +30,10 @@ namespace GumpStudio.App;
 
 public sealed partial class MainWindow : Window, IDisposable
 {
-    private readonly EditorSession _session = new();
+    private readonly EditorSession _session;
 
     private readonly GumpCanvas _canvas = null!;
+    private readonly ScrollViewer _scroller = null!;
     private readonly ListBox _elementList = null!;
     private readonly StackPanel _propertyPanel = null!;
     private readonly StackPanel _pageTabs = null!;
@@ -36,6 +41,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly TextBlock _status = null!;
     private readonly MenuItem _exportMenu = null!;
     private readonly MenuItem _moveToPageMenu = null!;
+    private readonly DockControl _layout = null!;
 
     /// <summary>
     /// Width of a row in the hue and font dropdowns.
@@ -66,9 +72,24 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private bool _suppressSelectionSync;
     private List<Element>? _listedElements;
+    private bool _layoutRestored;
 
     public MainWindow()
+        : this(new EditorSession())
     {
+    }
+
+    /// <param name="session">
+    /// The session this window edits. Injected so a test can supply one whose
+    /// settings point at a scratch file rather than the real application-data
+    /// one, and which has no client attached.
+    /// </param>
+    public MainWindow(EditorSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        _session = session;
+
         AvaloniaXamlLoader.Load(this);
 
         CanvasPanel canvasPanel = new();
@@ -87,10 +108,12 @@ public sealed partial class MainWindow : Window, IDisposable
         Fill("PropertiesTool", propertiesPanel);
 
         _canvas = canvasPanel.Canvas;
+        _scroller = canvasPanel.Scroller;
         _pageTabs = canvasPanel.PageTabs;
         _toolbox = toolboxPanel.Items;
         _elementList = elementsPanel.List;
         _propertyPanel = propertiesPanel.Rows;
+        _layout = this.FindControl<DockControl>("Layout")!;
         _status = this.FindControl<TextBlock>("StatusText")!;
         _exportMenu = this.FindControl<MenuItem>("MenuExport")!;
         _moveToPageMenu = this.FindControl<MenuItem>("MenuMoveToPage")!;
@@ -101,8 +124,12 @@ public sealed partial class MainWindow : Window, IDisposable
         this.FindControl<MenuItem>("MenuPageRoot")!.SubmenuOpened +=
             (_, _) => FillMoveToPageMenu(_moveToPageMenu);
 
+        this.FindControl<MenuItem>("MenuEditRoot")!.SubmenuOpened += (_, _) => RefreshEditMenu();
+
         _canvas.Session = _session;
-        _canvas.InteractionChanged += (_, _) => RefreshSelection();
+        _canvas.InteractionChanged += (_, _) => OnInteractionChanged();
+
+        _session.ModifiedChanged += (_, _) => RefreshTitle();
 
         _elementList.SelectionChanged += OnElementListSelectionChanged;
 
@@ -118,6 +145,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _elementList.ContextMenu = BuildContextMenu();
 
         LoadGridSettings();
+        RestoreWindowBounds();
 
         BuildExportMenu();
 
@@ -125,6 +153,8 @@ public sealed partial class MainWindow : Window, IDisposable
 
         Opened += async (_, _) =>
         {
+            RestorePanels();
+
             await EnsureClientAsync().ConfigureAwait(true);
 
             if (Program.StartupDocument is { } startup)
@@ -132,6 +162,344 @@ public sealed partial class MainWindow : Window, IDisposable
                 Guarded(() => _session.Open(startup));
             }
         };
+    }
+
+    /// <summary>
+    /// Brings the Edit menu's items in line with the selection and the history.
+    /// </summary>
+    /// <remarks>
+    /// Refreshed as the menu opens rather than on every change, which is both
+    /// cheaper and the only reliable moment: an item is only about to be read
+    /// then. The context menu has always done this; the menu bar did not, so
+    /// every item in it looked available whatever was selected, and undo and
+    /// redo never said what they would undo.
+    /// </remarks>
+    private void RefreshEditMenu()
+    {
+        int selected = _session.Canvas.Selection.Count;
+        bool anyGroup = _session.Canvas.Selection.Any(e => e is GroupElement { IsPageRoot: false });
+
+        Enable("MenuUndo", _session.History.CanUndo);
+        Enable("MenuRedo", _session.History.CanRedo);
+
+        // Naming what will be undone is the difference between a safe click and
+        // a guess.
+        Header(
+            "MenuUndo",
+            _session.History.UndoDescription is { } undoing ? $"_Undo {undoing}" : "_Undo");
+        Header(
+            "MenuRedo",
+            _session.History.RedoDescription is { } redoing ? $"_Redo {redoing}" : "_Redo");
+
+        Enable("MenuCut", selected > 0);
+        Enable("MenuCopy", selected > 0);
+        Enable("MenuDelete", selected > 0);
+        Enable("MenuGroup", selected >= 2);
+        Enable("MenuUngroup", anyGroup);
+        Enable("MenuBringToFront", selected > 0);
+        Enable("MenuBringForward", selected > 0);
+        Enable("MenuSendBackward", selected > 0);
+        Enable("MenuSendToBack", selected > 0);
+        Enable("MenuArrange", selected >= 2);
+
+        void Enable(string name, bool enabled)
+        {
+            if (this.FindControl<MenuItem>(name) is { } item)
+            {
+                item.IsEnabled = enabled;
+            }
+        }
+
+        void Header(string name, string header)
+        {
+            if (this.FindControl<MenuItem>(name) is { } item)
+            {
+                item.Header = header;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hides or restores one of the side panels.
+    /// </summary>
+    /// <remarks>
+    /// Through <c>HideDockable</c> and <c>RestoreDockable</c>, which move the
+    /// dockable between its owner and the root's hidden list. Dock's
+    /// <c>CloseDockable</c> would remove it from its owner outright and leave
+    /// nothing to restore, which is why the tabs are still not closable.
+    /// </remarks>
+    private void TogglePanel(string dockableId, string menuName)
+    {
+        if (_layout.Factory is not { } factory
+            || this.FindControl<MenuItem>(menuName) is not { } item)
+        {
+            return;
+        }
+
+        bool show = item.IsChecked;
+
+        if (show)
+        {
+            factory.RestoreDockable(dockableId);
+        }
+        else
+        {
+            factory.HideDockable(dockableId);
+        }
+
+        SaveLayout();
+    }
+
+    /// <summary>Brings every hidden panel back and restores the declared sizes.</summary>
+    private void ResetLayout()
+    {
+        if (_layout.Factory is not { } factory)
+        {
+            return;
+        }
+
+        foreach ((string dockableId, string menuName) in Panels)
+        {
+            factory.RestoreDockable(dockableId);
+
+            if (this.FindControl<MenuItem>(menuName) is { } item)
+            {
+                item.IsChecked = true;
+            }
+        }
+
+        foreach ((string paneId, double proportion) in DefaultProportions)
+        {
+            if (this.FindNameScope()?.Find(paneId) is IDock pane)
+            {
+                pane.Proportion = proportion;
+            }
+        }
+
+        SaveLayout();
+        SetStatus("Panel layout reset.");
+    }
+
+    /// <summary>The hideable panels, each with the menu item that toggles it.</summary>
+    private static readonly (string DockableId, string MenuName)[] Panels =
+    [
+        ("ToolboxTool", "MenuPanelToolbox"),
+        ("ElementsTool", "MenuPanelElements"),
+        ("PropertiesTool", "MenuPanelProperties"),
+    ];
+
+    /// <summary>
+    /// The proportions declared in <c>MainWindow.axaml</c>.
+    /// </summary>
+    /// <remarks>
+    /// Duplicated from the markup because Dock overwrites them in place as the
+    /// user drags a splitter, so once a layout has been restored the declared
+    /// values are no longer readable from the model.
+    /// </remarks>
+    private static readonly (string PaneId, double Proportion)[] DefaultProportions =
+    [
+        ("ToolboxPane", 0.13),
+        ("CanvasPane", 0.6),
+        ("RightPane", 0.27),
+        ("ElementsPane", 0.35),
+        ("PropertiesPane", 0.65),
+    ];
+
+    /// <summary>
+    /// The zoom levels the in and out commands step through.
+    /// </summary>
+    /// <remarks>
+    /// A fixed ladder rather than a multiplier, and every step below 1 is an
+    /// exact reciprocal of a whole number. Gump art is pixel art: an arbitrary
+    /// factor resamples it into a blur, while these land art pixels on whole
+    /// screen pixels.
+    /// </remarks>
+    private static readonly double[] ZoomLadder =
+        [0.25, 1.0 / 3, 0.5, 1.0, 2.0, 3.0, 4.0];
+
+    private void StepZoom(bool up)
+    {
+        double current = _canvas.Zoom;
+
+        double? next = up
+            ? ZoomLadder.FirstOrDefault(z => z > current + 0.0001)
+            : ZoomLadder.LastOrDefault(z => z < current - 0.0001);
+
+        if (next is null or 0)
+        {
+            SetStatus(up ? "Already at the largest zoom." : "Already at the smallest zoom.");
+
+            return;
+        }
+
+        SetZoom(next.Value);
+    }
+
+    private void SetZoom(double zoom)
+    {
+        _canvas.Zoom = zoom;
+
+        ReportZoom();
+    }
+
+    /// <summary>Scales the gump so all of it fits the visible area.</summary>
+    private void ZoomToFit()
+    {
+        _canvas.ZoomToFit(_scroller.Viewport);
+
+        ReportZoom();
+    }
+
+    private void ReportZoom() =>
+        SetStatus(string.Create(
+            CultureInfo.InvariantCulture,
+            $"Zoom {_canvas.Zoom * 100:0.#}%."));
+
+    /// <summary>
+    /// Records the window placement and panel arrangement.
+    /// </summary>
+    /// <remarks>
+    /// A restore has to run before this can overwrite anything, or opening the
+    /// window would save the declared layout over the stored one.
+    /// </remarks>
+    private void SaveLayout()
+    {
+        if (!_layoutRestored)
+        {
+            return;
+        }
+
+        WindowLayout layout = _session.Settings.Layout;
+
+        layout.Maximized = WindowState == WindowState.Maximized;
+
+        // Only meaningful while the window is in its normal state: a maximised
+        // window would otherwise store the screen size as its restore size.
+        if (WindowState == WindowState.Normal)
+        {
+            layout.Width = Width;
+            layout.Height = Height;
+            layout.X = Position.X;
+            layout.Y = Position.Y;
+        }
+
+        layout.Proportions.Clear();
+
+        foreach ((string paneId, _) in DefaultProportions)
+        {
+            if (this.FindNameScope()?.Find(paneId) is IDock { Proportion: var proportion }
+                && !double.IsNaN(proportion))
+            {
+                layout.Proportions[paneId] = proportion;
+            }
+        }
+
+        layout.HiddenPanels.Clear();
+
+        foreach ((string dockableId, string menuName) in Panels)
+        {
+            if (this.FindControl<MenuItem>(menuName) is { IsChecked: false })
+            {
+                layout.HiddenPanels.Add(dockableId);
+            }
+        }
+
+        _session.Settings.Save();
+    }
+
+    /// <summary>
+    /// Puts the window and its panels back where they were left.
+    /// </summary>
+    /// <remarks>
+    /// Every part is optional and independently validated: a stored layout that
+    /// no longer matches the declared dockables, or a position on a monitor that
+    /// is no longer attached, falls back to the default rather than opening a
+    /// window that cannot be reached.
+    /// </remarks>
+    private void RestoreWindowBounds()
+    {
+        WindowLayout layout = _session.Settings.Layout;
+
+        if (WindowLayout.IsUsableSize(layout.Width, layout.Height)
+            && layout is { Width: { } width, Height: { } height })
+        {
+            Width = width;
+            Height = height;
+        }
+
+        if (layout.X is { } x && layout.Y is { } y && IsOnAScreen(x, y))
+        {
+            Position = new PixelPoint(x, y);
+        }
+
+        // Applied after the size, so the stored restore size is not replaced by
+        // the maximised one.
+        if (layout.Maximized)
+        {
+            WindowState = WindowState.Maximized;
+        }
+    }
+
+    /// <summary>
+    /// Restores the panel arrangement.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the window bounds, and run once the window is open: the
+    /// bounds are wanted before the window is first shown, while the dock model
+    /// is only reliably built and initialised by then.
+    /// </remarks>
+    private void RestorePanels()
+    {
+        WindowLayout layout = _session.Settings.Layout;
+
+        foreach ((string paneId, double proportion) in layout.Proportions)
+        {
+            if (WindowLayout.IsUsableProportion(proportion)
+                && this.FindNameScope()?.Find(paneId) is IDock pane)
+            {
+                pane.Proportion = proportion;
+            }
+        }
+
+        if (_layout.Factory is { } factory)
+        {
+            foreach (string dockableId in layout.HiddenPanels)
+            {
+                if (Array.Exists(Panels, p => p.DockableId == dockableId))
+                {
+                    factory.HideDockable(dockableId);
+                }
+            }
+        }
+
+        foreach ((string dockableId, string menuName) in Panels)
+        {
+            if (this.FindControl<MenuItem>(menuName) is { } item)
+            {
+                item.IsChecked = !layout.HiddenPanels.Contains(dockableId);
+            }
+        }
+
+        _layoutRestored = true;
+    }
+
+    /// <summary>Whether a saved position still lands on an attached monitor.</summary>
+    private bool IsOnAScreen(int x, int y)
+    {
+        if (Screens is not { } screens)
+        {
+            return false;
+        }
+
+        foreach (Screen screen in screens.All)
+        {
+            if (screen.Bounds.Contains(new PixelPoint(x, y)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Gives a dockable declared in the layout the view it shows.</summary>
@@ -159,8 +527,8 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void WireMenus()
     {
-        Click("MenuNew", () => _session.NewDocument());
-        Click("MenuExit", Close);
+        ClickAsync("MenuNew", NewAsync);
+        ClickAsync("MenuExit", CloseAsync);
         Click("MenuUndo", () => { _session.History.Undo(); RefreshAll(); });
         Click("MenuRedo", () => { _session.History.Redo(); RefreshAll(); });
         Click("MenuSelectAll", () => { _session.Canvas.SelectAll(); RefreshAll(); });
@@ -179,13 +547,23 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuBringForward", () => Reorder(_session.Canvas.BringForward, "forward"));
         Click("MenuSendBackward", () => Reorder(_session.Canvas.SendBackward, "backward"));
         Click("MenuSendToBack", () => Reorder(_session.Canvas.SendToBack, "back"));
-        Click("MenuAddPage", () => { _session.Document.AddPage(); RefreshAll(); });
+        Click("MenuAddPage", AddPage);
         Click("MenuShowPage0", ToggleSharedPage);
+        Click("MenuPanelToolbox", () => TogglePanel("ToolboxTool", "MenuPanelToolbox"));
+        Click("MenuPanelElements", () => TogglePanel("ElementsTool", "MenuPanelElements"));
+        Click("MenuPanelProperties", () => TogglePanel("PropertiesTool", "MenuPanelProperties"));
+        Click("MenuResetLayout", ResetLayout);
+        Click("MenuZoomIn", () => StepZoom(up: true));
+        Click("MenuZoomOut", () => StepZoom(up: false));
+        Click("MenuZoomReset", () => SetZoom(1.0));
+        Click("MenuZoomFit", ZoomToFit);
         Click("MenuShowGrid", ApplyGridSettings);
         Click("MenuSnapToGrid", ApplyGridSettings);
         ClickAsync("MenuGridSize", ChooseGridSizeAsync);
         ClickAsync("MenuGumpProperties", EditGumpPropertiesAsync);
         Click("MenuRemovePage", RemovePage);
+        Click("MenuInsertPage", InsertPage);
+        Click("MenuClearPage", ClearPage);
 
         ClickAsync("MenuCut", () => CopyAsync(cut: true));
         ClickAsync("MenuCopy", () => CopyAsync(cut: false));
@@ -231,7 +609,12 @@ public sealed partial class MainWindow : Window, IDisposable
         BindAsync("Ctrl+V", PasteAsync, TextEditing.Yields);
 
         // These mean the same thing wherever the keyboard happens to be.
-        Bind("Ctrl+N", () => _session.NewDocument());
+        //
+        // Through the same NewAsync the File menu uses, not straight to
+        // NewDocument: the menu item asked before discarding unsaved work and
+        // the shortcut did not, so the two paths for one action disagreed about
+        // whether the document was safe.
+        BindAsync("Ctrl+N", NewAsync);
         Bind("Ctrl+G", GroupSelection);
         Bind("Ctrl+Shift+G", UngroupSelection);
         Bind("Ctrl+Shift+Up", () => Reorder(_session.Canvas.BringToFront, "front"));
@@ -242,6 +625,26 @@ public sealed partial class MainWindow : Window, IDisposable
         BindAsync("Ctrl+O", OpenAsync);
         BindAsync("Ctrl+S", () => SaveAsync(_session.DocumentPath));
         BindAsync("Ctrl+Shift+S", () => SaveAsync(null));
+
+        // Zoom, bound to more gestures than the menu paints. The label has to
+        // name one, but the key people press for "zoom in" is Ctrl and the '+'
+        // key — a shifted OemPlus — and the numeric keypad has its own codes
+        // entirely, so binding only the printed gesture leaves the shortcut
+        // working for nobody who reaches for the obvious key.
+        //
+        // These are ordinary window bindings because InputGesture on a MenuItem
+        // only draws the shortcut; it binds nothing. Every gesture in this menu
+        // bar was decorative once, and these three were decorative again from
+        // the day they were added until someone tried them.
+        Bind("Ctrl+OemPlus", () => StepZoom(up: true));
+        Bind("Ctrl+Shift+OemPlus", () => StepZoom(up: true));
+        Bind("Ctrl+Add", () => StepZoom(up: true));
+
+        Bind("Ctrl+OemMinus", () => StepZoom(up: false));
+        Bind("Ctrl+Subtract", () => StepZoom(up: false));
+
+        Bind("Ctrl+D0", () => SetZoom(1.0));
+        Bind("Ctrl+NumPad0", () => SetZoom(1.0));
     }
 
     /// <summary>Whether a shortcut steps aside while text is being edited.</summary>
@@ -732,19 +1135,19 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void SaveSettings()
     {
-        AppSettings settings = AppSettings.Load();
+        AppSettings settings = _session.Settings;
 
         settings.GridWidth = _session.Canvas.Grid.Width;
         settings.GridHeight = _session.Canvas.Grid.Height;
         settings.GridVisible = _session.Canvas.Grid.Visible;
         settings.GridSnap = _session.Canvas.Grid.SnapEnabled;
 
-        AppSettings.Save(settings);
+        settings.Save();
     }
 
     private void LoadGridSettings()
     {
-        AppSettings settings = AppSettings.Load();
+        AppSettings settings = _session.Settings;
 
         _session.Canvas.Grid.Width = settings.GridWidth;
         _session.Canvas.Grid.Height = settings.GridHeight;
@@ -762,6 +1165,39 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void AddPage()
+    {
+        AddPageCommand command = new(_session.Document);
+
+        _session.Apply(command);
+
+        _session.ActivePageIndex = _session.Document.PageCount - 1;
+
+        RefreshAll();
+        SetStatus($"Added {command.Page.Name}.");
+    }
+
+    private void InsertPage()
+    {
+        int index = _session.ActivePageIndex;
+        InsertPageCommand command = new(_session.Document, index);
+
+        _session.Apply(command);
+
+        _session.ActivePageIndex = index;
+
+        RefreshAll();
+        SetStatus($"Inserted a page at {index}.");
+    }
+
+    /// <summary>
+    /// Removes the active page.
+    /// </summary>
+    /// <remarks>
+    /// Through the undo history, unlike the original and unlike this editor's
+    /// first version: removing a page takes every element on it, and that was
+    /// the one action here with no way back.
+    /// </remarks>
     private void RemovePage()
     {
         if (_session.Document.PageCount == 1)
@@ -771,8 +1207,33 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        _session.ActivePageIndex = _session.Document.RemovePage(_session.ActivePageIndex);
+        RemovePageCommand command = new(_session.Document, _session.ActivePageIndex);
+        int active = command.ActiveIndexAfterRemoval;
+
+        _session.Apply(command);
+
+        _session.ActivePageIndex = active;
+
         RefreshAll();
+        SetStatus($"{command.Description}. Undo brings it back with its elements.");
+    }
+
+    private void ClearPage()
+    {
+        ClearPageCommand command = new(_session.ActivePage);
+
+        if (!command.HasContent)
+        {
+            SetStatus("That page is already empty.");
+
+            return;
+        }
+
+        _session.Canvas.ClearSelection();
+        _session.Apply(command);
+
+        RefreshAll();
+        SetStatus(command.Description + ".");
     }
 
     private void RefreshAll()
@@ -782,6 +1243,8 @@ public sealed partial class MainWindow : Window, IDisposable
         RefreshProperties();
 
         _canvas.InvalidateVisual();
+
+        RefreshTitle();
 
         SetStatus(
             $"{_session.Document.PageCount} page(s), "
@@ -847,6 +1310,17 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
+    private bool _closeConfirmed;
+
+    // What the inspector is currently showing, so a mid-drag update can tell
+    // that the panel's shape is still right for the selection.
+    private Element? _shownElement;
+    private int _shownSelectionCount = -1;
+
+    // One per editor on screen, each pushing its element's current value back
+    // into the control without rebuilding it.
+    private readonly List<Action> _propertyValueRefreshers = [];
+
     private void OnElementListSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionSync)
@@ -860,6 +1334,53 @@ public sealed partial class MainWindow : Window, IDisposable
         _canvas.InvalidateVisual();
     }
 
+    /// <summary>
+    /// Reacts to a canvas gesture.
+    /// </summary>
+    /// <remarks>
+    /// The canvas raises this on every pointer move during a drag. Rebuilding
+    /// the inspector each time meant tearing down and reallocating a grid, a
+    /// label, a tooltip and an editor with its handlers for every property of
+    /// the selected element, per mouse-move event — the single most expensive
+    /// thing the editor did while dragging. Mid-gesture the shape of the panel
+    /// cannot change, only the numbers in it, so the values are pushed into the
+    /// editors already on screen.
+    ///
+    /// The selection is still compared, because pressing a different element
+    /// begins a drag and changes the selection in the same gesture.
+    /// </remarks>
+    private void OnInteractionChanged()
+    {
+        int count = _session.Canvas.Selection.Count;
+        Element? single = count == 1 ? _session.Canvas.Selection[0] : null;
+
+        if (_session.Canvas.IsDragging
+            && count == _shownSelectionCount
+            && ReferenceEquals(single, _shownElement))
+        {
+            UpdatePropertyValues();
+
+            return;
+        }
+
+        RefreshSelection();
+    }
+
+    /// <summary>
+    /// Re-reads each editor's value from the element without rebuilding the row.
+    /// </summary>
+    /// <remarks>
+    /// A focused field is left alone: it holds what is being typed, which the
+    /// element does not have yet.
+    /// </remarks>
+    private void UpdatePropertyValues()
+    {
+        foreach (Action refresh in _propertyValueRefreshers)
+        {
+            refresh();
+        }
+    }
+
     private void RefreshSelection()
     {
         RefreshElementList();
@@ -869,6 +1390,10 @@ public sealed partial class MainWindow : Window, IDisposable
     private void RefreshProperties()
     {
         _propertyPanel.Children.Clear();
+        _propertyValueRefreshers.Clear();
+
+        _shownSelectionCount = _session.Canvas.Selection.Count;
+        _shownElement = _shownSelectionCount == 1 ? _session.Canvas.Selection[0] : null;
 
         if (_session.Canvas.Selection.Count != 1)
         {
@@ -954,6 +1479,22 @@ public sealed partial class MainWindow : Window, IDisposable
             }
         };
 
+        _propertyValueRefreshers.Add(() =>
+        {
+            if (box.IsFocused)
+            {
+                return;
+            }
+
+            string current = Convert.ToString(row.Read(element), CultureInfo.InvariantCulture)
+                ?? string.Empty;
+
+            if (!string.Equals(box.Text, current, StringComparison.Ordinal))
+            {
+                box.Text = current;
+            }
+        });
+
         return box;
     }
 
@@ -986,7 +1527,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             int current = row.Read(element) is int id ? id : 0;
 
-            ArtBrowserWindow browser = new(_session.Data, kind, current);
+            ArtBrowserWindow browser = new(_session.Data, kind, current, _session.Settings);
 
             await browser.ShowDialog(this).ConfigureAwait(true);
 
@@ -1484,6 +2025,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private async Task OpenAsync()
     {
+        if (!await ConfirmDiscardAsync("opening another").ConfigureAwait(true))
+        {
+            return;
+        }
+
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open gump",
@@ -1500,6 +2046,15 @@ public sealed partial class MainWindow : Window, IDisposable
         RefreshAll();
     }
 
+    /// <summary>
+    /// Imports a 1.8 <c>.gump</c> or <c>.gumpling</c>.
+    /// </summary>
+    /// <remarks>
+    /// The two are not the same import: a gump replaces the document, while a
+    /// gumpling is a single group added to the page that is open. Only the
+    /// first discards anything, so only the first asks — and it asks after the
+    /// file has been chosen, so cancelling the picker costs no question.
+    /// </remarks>
     private async Task ImportLegacyAsync()
     {
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
@@ -1517,7 +2072,27 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        _session.ImportLegacy(files[0].Path.LocalPath);
+        string path = files[0].Path.LocalPath;
+
+        if (Path.GetExtension(path).Equals(".gumpling", StringComparison.OrdinalIgnoreCase))
+        {
+            GroupElement group = _session.ImportGumpling(path);
+
+            _session.Canvas.Select(group);
+            _session.MeasureActivePage();
+
+            RefreshAll();
+            SetStatus($"Added {group.Name} to page {_session.ActivePageIndex}.");
+
+            return;
+        }
+
+        if (!await ConfirmDiscardAsync("importing").ConfigureAwait(true))
+        {
+            return;
+        }
+
+        _session.ImportLegacy(path);
         RefreshAll();
 
         SetStatus("Imported. Save it to store the document in the current format.");
@@ -1533,6 +2108,11 @@ public sealed partial class MainWindow : Window, IDisposable
     /// </remarks>
     private async Task ImportLayoutAsync()
     {
+        if (!await ConfirmDiscardAsync("importing").ConfigureAwait(true))
+        {
+            return;
+        }
+
         ImportLayoutWindow dialog = new();
 
         await dialog.ShowDialog(this).ConfigureAwait(true);
@@ -1600,7 +2180,7 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        AppSettings settings = AppSettings.Load();
+        AppSettings settings = _session.Settings;
 
         GumpExportOptions defaults = new()
         {
@@ -1633,15 +2213,23 @@ public sealed partial class MainWindow : Window, IDisposable
     /// <summary>Prompts for a client folder when none is configured yet.</summary>
     private async Task EnsureClientAsync()
     {
-        string? remembered = AppSettings.Load().ClientPath;
+        string? remembered = _session.Settings.ClientPath;
 
-        if (remembered is not null && _session.OpenClient(remembered).Count == 0)
+        if (remembered is not null)
         {
-            ForgetPickerEntries();
+            SetStatus("Loading client art…");
 
-            RefreshAll();
+            IReadOnlyList<string> missing =
+                await _session.OpenClientAsync(remembered).ConfigureAwait(true);
 
-            return;
+            if (missing.Count == 0)
+            {
+                ForgetPickerEntries();
+
+                RefreshAll();
+
+                return;
+            }
         }
 
         await ChooseClientAsync(force: false).ConfigureAwait(true);
@@ -1667,7 +2255,10 @@ public sealed partial class MainWindow : Window, IDisposable
         }
 
         string path = folders[0].Path.LocalPath;
-        IReadOnlyList<string> missing = _session.OpenClient(path);
+
+        SetStatus("Loading client art…");
+
+        IReadOnlyList<string> missing = await _session.OpenClientAsync(path).ConfigureAwait(true);
 
         ForgetPickerEntries();
 
@@ -1680,7 +2271,8 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        AppSettings.Save(new AppSettings { ClientPath = path });
+        _session.Settings.ClientPath = path;
+        _session.Settings.Save();
 
         _session.MeasureActivePage();
         RefreshAll();
@@ -1690,6 +2282,116 @@ public sealed partial class MainWindow : Window, IDisposable
     {
         _status.Text = message;
         _status.Foreground = isError ? Brushes.IndianRed : Brushes.Silver;
+    }
+
+    /// <summary>
+    /// Asks before an action that would throw away unsaved work.
+    /// </summary>
+    /// <param name="action">
+    /// What is about to happen, as a gerund, for the question's wording.
+    /// </param>
+    /// <returns>False when the user chose to keep what they have.</returns>
+    /// <remarks>
+    /// Nothing asked before this existed: New, Open, both importers and Exit
+    /// all discarded the document silently.
+    /// </remarks>
+    private async Task<bool> ConfirmDiscardAsync(string action)
+    {
+        if (!_session.IsModified)
+        {
+            return true;
+        }
+
+        string name = _session.DocumentPath is { } path
+            ? Path.GetFileName(path)
+            : "This gump";
+
+        ConfirmWindow dialog = new(
+            $"{name} has unsaved changes. Discard them before {action}?");
+
+        await dialog.ShowDialog(this).ConfigureAwait(true);
+
+        return dialog.Confirmed;
+    }
+
+    private async Task NewAsync()
+    {
+        if (!await ConfirmDiscardAsync("starting a new one").ConfigureAwait(true))
+        {
+            return;
+        }
+
+        _session.NewDocument();
+    }
+
+    /// <summary>
+    /// Closes the window, asking first.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="OnClosing"/> asks as well, for the window's own close button.
+    /// This path cancels before <see cref="Window.Close()"/> is reached so the
+    /// close is never started, which keeps the two from asking twice.
+    /// </remarks>
+    private async Task CloseAsync()
+    {
+        if (!await ConfirmDiscardAsync("closing").ConfigureAwait(true))
+        {
+            return;
+        }
+
+        _closeConfirmed = true;
+
+        Close();
+    }
+
+    /// <summary>
+    /// Intercepts the window's own close button to ask about unsaved work.
+    /// </summary>
+    /// <remarks>
+    /// The close has to be cancelled first and re-issued after the answer,
+    /// because a dialog cannot be awaited inside the synchronous
+    /// <c>Closing</c> handler.
+    /// </remarks>
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        ArgumentNullException.ThrowIfNull(e);
+
+        base.OnClosing(e);
+
+        SaveLayout();
+
+        if (e.Cancel || _closeConfirmed || !_session.IsModified)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+
+        _ = ConfirmAndCloseAsync();
+    }
+
+    private async Task ConfirmAndCloseAsync()
+    {
+        if (!await ConfirmDiscardAsync("closing").ConfigureAwait(true))
+        {
+            return;
+        }
+
+        _closeConfirmed = true;
+
+        Close();
+    }
+
+    /// <summary>Shows the document name and whether it has unsaved changes.</summary>
+    private void RefreshTitle()
+    {
+        string name = _session.DocumentPath is { } path
+            ? Path.GetFileName(path)
+            : "Untitled";
+
+        Title = _session.IsModified
+            ? $"GumpStudio — {name}*"
+            : $"GumpStudio — {name}";
     }
 
     protected override void OnClosed(EventArgs e)

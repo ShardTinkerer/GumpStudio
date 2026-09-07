@@ -22,6 +22,17 @@
     <PackageReference Include="SkiaSharp" />
   </ItemGroup>
 
+  <!--
+    The shell has internal helpers worth testing directly - the Skia-to-Avalonia
+    pixel copy in particular, whose alpha handling is easy to get wrong and
+    invisible until art with soft edges is drawn.
+  -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>GumpStudio.App.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../GumpStudio.Core/GumpStudio.Core.csproj" />
     <ProjectReference Include="../GumpStudio.Rendering/GumpStudio.Rendering.csproj" />

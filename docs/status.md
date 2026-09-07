@@ -1,6 +1,6 @@
 # Status and roadmap
 
-Last updated after the preview work. Phases 0, 1, 2, 3, 4, 5, 7, 8 and 9 are
+Last updated after the shell work. Phases 0, 1, 2, 3, 4, 5, 7, 8, 9 and 10 are
 complete; Phase 6 is partly done.
 
 ## Why the rewrite exists
@@ -1125,6 +1125,697 @@ sit against a dark shell and still do, and the AOT suppressions did not move: th
 Simple theme binds a dockable's title the same way its Fluent sibling did, and
 the published binary was rebuilt to confirm it.
 
+## Phase 10 — The shell catches up ✅
+
+Phases 0 to 9 built the element model, the data layer, the converters and the
+importers, and every one of them is covered by tests. The shell was not: it had
+no test project at all, two ways to lose work, and it did enough per mouse-move
+to be visibly slow at the one thing the application is for.
+
+### A test project for the shell
+
+`Avalonia.Headless` had been pinned in `Directory.Packages.props` since the
+Avalonia bump and referenced by nothing, so roughly 3,700 lines of UI —
+including the 1,708-line `MainWindow.axaml.cs` — had no regression cover at all.
+Every Avalonia-12 behaviour the last two phases worked out by hand was an
+unguarded assumption.
+
+`tests/GumpStudio.App.Tests` uses it. `HeadlessUnitTestSession` is started from
+the real `App`, not a bare `Application`: the window under test is built out of
+Dock's controls and those need the themes `App.axaml` loads.
+`OnFrameworkInitializationCompleted` only creates a main window for a classic
+desktop lifetime, which a headless session does not provide, so starting the
+real application touches nothing.
+
+`MainWindow` and `EditorSession` gained constructors that take what they used to
+build themselves, so a test can hand them settings pointing at a scratch file
+instead of the real one in the application-data folder.
+
+It earned itself immediately. The first version of the layout restore **crashed
+on startup**, and only running the application found it — see below.
+
+### Removing a page destroyed it
+
+`RemovePage` called `GumpDocument.RemovePage` directly. Adding a page did the
+same. Neither went through `History`, so removing a page took every element on it
+with no way back — the one action in the editor that destroyed work outright, and
+the very failure mode the undo history exists to prevent.
+
+`source/GumpStudio.Core/Commands/PageCommands.cs` adds `AddPageCommand`,
+`InsertPageCommand`, `RemovePageCommand` and `ClearPageCommand`. A removed page
+is held by the command, so undo restores the same instance with its elements in
+their original order. `GumpDocument.InsertPage` already existed with no menu item
+behind it, so *Page ▸ Insert here* and *Page ▸ Clear* came almost free.
+
+Two details are deliberate. `AddPageCommand` records the index it inserted at
+rather than assuming undo will find its page last, and
+`RemovePageCommand.ActiveIndexAfterRemoval` is computed once in the constructor —
+read after `Execute` it would otherwise have counted a page that was already
+gone.
+
+### Nothing knew the document was unsaved
+
+`EditorSession` had no notion of modification, so *New*, *Open*, both importers
+and *Exit* discarded the document silently, and the title bar was the constant
+string `GumpStudio`.
+
+`IsModified` is derived from the undo history rather than a flag each mutation
+sets, so undoing back to the saved point reports clean again. The undo cursor
+alone cannot answer that question: undo one step, apply a different change, and
+the cursor returns to the number it had at save time over a document that no
+longer matches it. `UndoHistory` therefore stamps each retained command with a
+sequence number and exposes `StateId`, the stamp at the cursor. That also
+survives the trimming `Capacity` forces, which shifts every index.
+
+Deriving it this way is only honest because every change now goes through the
+history — which is why the page commands above had to come first.
+
+`ConfirmWindow` asks before a discard. The project has no message-box
+abstraction on purpose, errors going to the status bar instead, so this follows
+the shape of every other dialog here: a modal with a result property read after
+it closes. `OnClosing` asks as well, for the window's own close button, and
+cancels the close to await the answer because a dialog cannot be awaited inside a
+synchronous `Closing` handler.
+
+### Choosing a client folder reset every other preference
+
+`AppSettings.Save` writes the whole file, and one call site passed a freshly
+constructed instance:
+
+```csharp
+AppSettings.Save(new AppSettings { ClientPath = path });
+```
+
+So picking a client folder silently reverted the grid size, grid visibility,
+snapping, both art-browser preferences and every remembered export dialect. The
+other eight call sites did load-modify-save.
+
+The line was not the defect; the shape was. Settings were re-read from disk at
+**eight** separate places across `MainWindow` and `ArtBrowserWindow`, so any of
+them could have grown the same bug. `EditorSession` now holds one instance and
+hands it to the art browser, and `AppSettings` carries the path it was read from
+so `Save` writes back where it came from — which is also what lets a test work
+against a scratch file.
+
+Adding a property to `AppSettings` then exposed an older trap. With
+`init`-only properties the JSON source generator assigns every member it knows
+about while constructing the object, so a settings file written before a property
+existed deserialises it as **null** and the initialiser never survives. Every
+settings file already on disk lacked `Layout`, so the first run crashed on it.
+`ExportDialects` had exactly the same shape and the same latent
+`NullReferenceException`, waiting for anyone whose file predated it. Both setters
+now refuse null.
+
+### `.gumpling` was offered and could only fail
+
+The import picker had advertised `*.gumpling` from the start, but every chosen
+file went to `LegacyGumpImporter.ImportDocument`, which only understands a whole
+document. `ImportGumpling` existed with **zero callers**.
+
+They are not the same operation: a gump replaces the document, a gumpling is one
+saved group added to the page that is open. The import now dispatches on the
+extension, adds the group through the undo history, and asks about discarding
+only for the case that discards something — after the file has been chosen, so
+cancelling the picker costs no question. `LegacyGumpFixture` gained a gumpling
+builder, which is what proved the importer works: it had never been executed.
+
+The full gumpling *library* — the docked tree, the folders, export — is still
+absent.
+
+### Dragging an element rebuilt the inspector, per mouse-move
+
+`CanvasInteractionController.PointerMoved` raises `Changed` on every pointer
+move. The window wired that to `RefreshSelection`, which begins
+`_propertyPanel.Children.Clear()` and then allocates a `Grid`, its column
+definitions, a label, a tooltip and an editor control with one to three handler
+closures — for every property of the selected element. Around fifteen controls
+built and thrown away per mouse-move event, on top of a full re-render.
+
+Mid-gesture the shape of the panel cannot change, only the numbers in it, so the
+values are pushed into the editors already on screen. The selection is still
+compared, because pressing a different element begins a drag and changes the
+selection in the same gesture. A focused field is left alone: it holds what is
+being typed, which the element does not have yet.
+
+### The grid was thirty thousand draw calls a frame
+
+`DrawGrid` drew a one-pixel rectangle per intersection. At the default 5×5
+spacing over the design surface that is about 31,500 `DrawRect` calls, every
+frame, and the existing comment acknowledged the cost while only guarding
+against spacings below three pixels.
+
+It is now one cell in a small bitmap, tiled through an `SKShader` with repeat
+mode, filled as a single rectangle. Measured over sixty frames at 1024×768:
+
+| | per frame |
+|---|---|
+| A rectangle per dot | 7.01 ms |
+| One tiled fill | 0.56 ms |
+
+Seven milliseconds a frame was the grid alone, before anything else was drawn.
+
+`GridRenderingTests` walks every pixel at four spacings and asserts a dot exactly
+where the nested loop put one and nowhere else, so the rewrite is pinned to the
+placement it replaced rather than to a screenshot.
+
+### Everything else the canvas did every frame
+
+- A `SolidColorBrush` for a constant backdrop colour, a `GumpRenderer`, and three
+  `RenderOptions` records — one built and two more from `with` expressions.
+  Hoisted; the options are rebuilt only when something in them moves.
+- An `SKPaint` per element per frame in `ElementPainter` for the alpha wash, the
+  text-entry wash, the missing-art marker and the group outline, plus an
+  `SKImage[9]` per nine-sliced element. All now belong to the painter, which
+  lives for one page render, and it is `IDisposable` so the native objects go
+  with it.
+- `page.Descendants().Where(e => e.IsSelected)` per frame — an iterator chain and
+  a closure over the whole tree to find the one or two selected elements.
+  Replaced with a plain recursive walk.
+- **A `Cursor` allocated on every pointer-move.** `CursorFor` returned `new(...)`
+  and `UpdateCursor` assigned it unconditionally, even when the mode had not
+  changed. A `Cursor` owns a platform handle and none of these were ever
+  disposed. Five shared instances now, assigned only when the mode changes.
+
+### The art cache scanned a list on every hit
+
+`UoArtSource` kept a `LinkedList` for recency and looked nodes up by value, so
+`LinkedList<T>.Remove(item)` walked up to 512 nodes **on every cache hit**, under
+the lock, for every art draw of every frame. It keeps a node dictionary now.
+
+Its bound was also a count, not a size. Entries here differ enormously — a
+nine-slice corner is a few hundred bytes and a full-window background is
+megabytes — so 512 entries either wasted the cache on small art or held hundreds
+of megabytes of large art. It is a 64 MB budget now, the shape the art browser's
+own thumbnail cache already used.
+
+### Measuring and painting disagreed about what to fetch
+
+`MeasureContentSizes` asked the art source for text without a hue or a font
+family while `ElementPainter` asked with both, so every hued or ASCII label
+produced two distinct cache keys: two full text renders and two cache slots for
+one element. The same split applied to images and items.
+
+For an ASCII label it was not merely wasteful. The measure pass sized it with a
+Unicode face and the paint pass drew it with an ASCII one, so the box was the
+wrong size for the glyphs in it.
+
+Gump-backed elements are now measured through `TryGetGumpSize`, which answers
+from the index where the container allows it and adds no image to the cache at
+all, and a button is measured from the face its state will actually draw.
+
+### Panels that can be hidden, and a layout that survives a restart
+
+Every dockable carried `CanClose="False"`, with the reason in the markup: closing
+a tool hid it and nothing brought one back.
+
+Dock's `CloseDockable` removes a dockable from its owner outright, so
+`RestoreDockable` would find nothing — enabling the tab's close button really
+would cost a panel. `HideDockable` parks it on the root's hidden list instead,
+where restore can find it. So the View menu gained a checkable item per panel
+and a *Reset panel layout*, and the tabs stay unclosable deliberately.
+
+The layout is remembered in `AppSettings` through the existing source-generated
+JSON. Not through Dock's own serialiser: `IDockSerializer` is a contract only,
+its implementations ship in separate packages that reflect over the dock model,
+and this application is published with NativeAOT and already suppresses Dock's
+`IL2104`/`IL3053`. Reintroducing reflective serialisation over the same model
+would widen a suppression the CI publish job exists to police.
+
+What is stored is a constrained snapshot: each pane's proportion, which panels
+are hidden, and the window's own size, position and maximised state. Tearing a
+panel off into its own window, or re-tabbing one beside another, is **not**
+remembered and falls back to the declared layout. Every part is validated
+independently — a proportion outside a usable range is rejected rather than
+clamped, since either extreme collapses a panel to nothing, and a stored position
+is only applied if it still lands on an attached monitor.
+
+The window bounds are restored in the constructor and the panels once the window
+is open, because the bounds are wanted before the window is first shown while the
+dock model is only reliably built by then. Getting that split wrong is what
+crashed the first version.
+
+### Zoom, which neither version ever had
+
+The canvas was a fixed 1024×768 at one art pixel to one screen pixel, with
+`ToGump` a bare `(int)` cast and nowhere for a factor to go. A gump wider than
+the window could not be seen whole, and fine placement meant typing coordinates.
+
+`Zoom` scales the surface and the render transform, and `ToGump` divides by it,
+flooring rather than truncating so a press anywhere within a gump pixel belongs
+to it. The ladder the menu steps through is fixed rather than multiplicative, and
+every step below 1 is the reciprocal of a whole number: gump art is pixel art, so
+an arbitrary factor resamples it into a blur while these land art pixels on whole
+screen pixels.
+
+Resize handles have to stay the same size under the pointer at every zoom, which
+means growing them in gump units as the view shrinks — and the drawing and the
+hit testing have to agree on the number, or a handle would not be where it looks.
+`HandleGeometry` takes a handle size, `CanvasInteractionController` carries one,
+and the canvas sets it from the zoom, rounded up and forced odd so a handle still
+centres on its corner under integer halving. The grab margin around an element
+grows with it.
+
+### DPI
+
+`EnsureSurface` allocated the backing bitmap at the logical size and stamped it
+96 dpi regardless of the display, so everything was under-sampled at any scaling
+above 100%. It is allocated in device pixels now, with its dpi scaled to match,
+and the drawing scaled once so everything below still works in gump units.
+
+### Opening a client froze the window
+
+`EnsureClientAsync` was `async Task` with no `await` before the blocking work.
+`UoDataContext.Open` reads the hue table, the tile data, the cliloc table — twice
+on a modern client, since it tries a plain parse before decompressing — and up to
+thirteen font files, and walks every index of every UOP container. All of it ran
+on the UI thread, including at startup before anything had been drawn.
+
+`OpenClientAsync` moves the reading to the pool and adopts the result back on the
+caller's context, so nothing that listens has to think about threads. A full open
+of a retail client measures about 320 ms warm; that is now 320 ms of a responsive
+window rather than a frozen one.
+
+### The UOP payload memo held one entry
+
+Decoding a UOP entry is an inflate plus, for compression flag 3, a
+Burrows-Wheeler pass. A memo of the single most recent payload collapsed the
+usual `GetEntry`-then-`Read` pair to one decode — but only while requests arrived
+in that order, one at a time. An art browser interleaves indices, and on a
+container that keeps its dimensions inside the payload every entry lookup is
+itself a full decode, so revisiting an entry meant inflating it again.
+
+It is a byte-budgeted window of 32 MB now, least-recently-used, with a node
+dictionary so a hit costs no scan. `UopPayloadWindowTests` covers re-reads,
+interleaved reads, reads under `Parallel.For`, and reads of a container larger
+than the budget so eviction genuinely turns over — the invariant being that
+widening the window changed nothing about what comes back.
+
+Verified against a retail UOP client as well: all 65 real-client tests pass, and
+the AOT-published CLI reads 5,571 gumps, 39,516 items and 123,785 cliloc strings
+out of it.
+
+### Two more allocation sinks
+
+`UopHash.ComputeForIndex` built two strings per call —
+`string.Format(...).ToLowerInvariant()` — and a client open hashes every possible
+index of every container, over 140,000 of them, for roughly 295,000 string
+allocations. It formats into a `stackalloc` buffer and lowercases as it copies,
+`Compute` having always taken a span.
+
+Worth recording honestly: this made **no measurable difference** to wall-clock
+client-open time, which stayed around 320 ms. The allocations were real but they
+were cheap Gen0 ones, and the cost of opening a client is dominated by I/O and
+decompression. It is a GC-pressure fix, not a speed-up. The known-answer tests
+against a real package pin the rewrite to identical hashes.
+
+The art-browser filter allocated an `int.ToString()` **per entry per keystroke** —
+some forty thousand for the item browser — then rebuilt the match list and
+re-chunked every gallery row, with no debounce. It formats into a stack buffer
+now, behind a 150 ms debounce.
+
+### Every thumbnail was PNG-encoded and immediately PNG-decoded
+
+Crossing from Skia to Avalonia went through `Encode(SKEncodedImageFormat.Png,
+100)` into a `MemoryStream` and back out as a `Bitmap` — a full deflate and
+inflate, per art-browser thumbnail and per font sample in a dropdown, for data
+already sitting in memory as raw BGRA. The font picker had its own copy of the
+same code.
+
+`SkiaBitmap.ToAvalonia` is a pixel copy through a locked framebuffer, the pattern
+`GumpCanvas` already used, and both callers share it.
+
+The round-trip had been premultiplying alpha as a side effect of how the two
+libraries store pixels, so the copy has to do it deliberately — gump art is full
+of soft-edged glyph masks and translucent regions, and getting it wrong shows as
+haloes rather than as an error. That conversion is pinned in plain Skia rather
+than through Avalonia, because the headless platform substitutes its own bitmap
+and reports the platform's format regardless of what was asked for, which makes
+it the wrong place to assert a pixel layout. Finding that out took a diagnostic
+run: the first attempt at those tests was asserting against the stub.
+
+### The thumbnail cache was first-in-first-out, and never released
+
+Insertion-order eviction discards exactly what is about to be wanted again,
+because scrolling down and back up asks for the earliest entries last. It is
+least-recently-used now.
+
+`OnClosed` released only the preview. The cached thumbnails each own unmanaged
+pixel memory and a browser is constructed afresh on every browse click, so up to
+several hundred bitmaps per visit were left to their finalizers. They are
+disposed now — except on a tile-size change, where the cache is invalidated but
+tiles on screen still hold their bitmaps as an `Image.Source`. Those are retired
+and released when the window closes, rather than disposed under a live reference.
+
+### Smaller things
+
+- `Delete` and `Ctrl+A` were handled by both the canvas and the window. An
+  Avalonia window `KeyBinding` fires even over a key an inner control has marked
+  handled — the quirk Phase 9 documented — so each ran twice. The canvas keeps
+  only what is its own: arrow-key nudge and `Escape`.
+- The Edit menu never updated. Every item was permanently enabled whatever was
+  selected, and undo and redo never named what they would reverse, though the
+  context menu had always done both. It refreshes on `SubmenuOpened`, which is
+  the only moment the state is about to be read.
+
+### A second pass, after the first one shipped
+
+Most of the above landed in one pass. Five things did not, and one of them
+was found by a user pressing a key rather than by anything here. What
+follows is that second pass, and its own honest account of the item it
+declined.
+
+### The shortcuts that were only painted on
+
+The zoom items shipped with `InputGesture="Ctrl+OemPlus"` and its two siblings on
+the menu items and **no bindings behind them**, so the menu entries worked and the
+keys did nothing. A user found it by pressing them.
+
+`InputGesture` on a `MenuItem` only draws the shortcut beside the label; it binds
+nothing. That is written down a few lines above `BindShortcuts`, because Phase 9
+discovered that *every* gesture in this menu bar was decorative and bound them
+all by hand. Adding three more painted labels reintroduced exactly the defect
+that section exists to describe.
+
+So the shortcuts are bound now, and to more gestures than the menu paints. A
+label has to name one gesture, but the key people reach for to zoom in is Ctrl
+and `+` — a shifted `OemPlus` — and the numeric keypad has its own key codes
+entirely, so binding only the printed form leaves the shortcut working for
+nobody who presses the obvious key. Zoom in takes `Ctrl+OemPlus`,
+`Ctrl+Shift+OemPlus` and `Ctrl+Add`; zoom out takes `Ctrl+OemMinus` and
+`Ctrl+Subtract`; actual size takes `Ctrl+D0` and `Ctrl+NumPad0`.
+
+**The class of bug is closed rather than the instance.**
+`ShortcutBindingTests` walks the menus, collects every painted `InputGesture` and
+asserts each has a matching `KeyBinding` on the window. Run against the code as
+shipped it names exactly three items and no others:
+
+```
+MenuZoomIn paints Ctrl+OemPlus with no binding
+MenuZoomOut paints Ctrl+OemMinus with no binding
+MenuZoomReset paints Ctrl+D0 with no binding
+```
+
+It also asserts no gesture is bound twice, since two bindings for one gesture
+both fire.
+
+### Ctrl+N and File ▸ New disagreed about unsaved work
+
+The same pass that added the discard prompt wired it to the menu item and left
+the shortcut alone: `MenuNew` went through `NewAsync`, which asks, while
+`Ctrl+N` called straight through to `NewDocument`, which does not. Two paths for
+one action, one of them still silently destroying the document — the cost of
+registering every action three times over, realised.
+
+`Ctrl+N` goes through `NewAsync` now.
+
+### The keyboard table, finally tested
+
+Phase 10 listed this as a deliverable and did not write it, which left the one
+gap in the area the test project was built for.
+
+`KeyboardYieldTests` drives real keystrokes through
+`HeadlessWindowExtensions.KeyPress`, so the table is pinned to what the
+application does rather than to how it is written: Ctrl+A on the canvas selects
+every element, Ctrl+A with the caret in a text box selects none, and the same for
+Delete and Ctrl+Z. The clipboard gestures cannot be driven headlessly, so those
+are asserted through `CanExecute` — which is the mechanism that makes them yield,
+and the reason yielding is expressed that way rather than as an early return.
+
+### Opening a client no longer reads what it does not need
+
+Phase 10 moved the whole client open onto the thread pool but left it eager, so
+first paint still waited for all of it. The cliloc table — around 124,000
+strings, parsed twice on a modern client because a plain parse is tried before
+decompressing — plus `fonts.mul` and up to thirteen `unifont*.mul` files are now
+read on first use. None of the three is needed to draw a gump's first frame.
+
+Measured on a retail UOP client, release build, warm cache:
+
+| | |
+|---|---|
+| Open: art indexes, hues, tiledata | **89 ms** |
+| Cliloc and both font families, now deferred | 152 ms |
+
+So the blocking part of a client open went from about 241 ms to 89 ms, and the
+rest happens the first time something renders text.
+
+Two constraints shaped it. `Lazy<T>`'s default `ExecutionAndPublication` thread
+safety is load-bearing rather than incidental, because text is rendered from
+background art decodes as well as from the UI thread. And `UnicodeFonts` is
+`IDisposable`, so `Dispose` checks `IsValueCreated` — reading the property there
+would open thirteen font files purely in order to release them again. The paths
+are still resolved eagerly in `Open`, so which files an installation is missing
+is decided exactly when it was before; only the reading moved.
+
+### The art browser stopped decoding on the UI thread
+
+`UpdatePreview` ran a full inflate, Burrows-Wheeler pass and RLE decode of
+**full-size** art inline, and it is reached from every click and every arrow-key
+move through the list — a stall per keypress, contending with the background
+thumbnail decoder for the same container.
+
+The decode moved to the pool. Arrow-keying produces a burst, so each request
+carries a generation number and only the newest result is allowed to land. The
+title and the id appear immediately; only the image and its dimensions wait. The
+previous bitmap is released *after* the new one is assigned, so the pane never
+blanks between two selections and nothing disposes a bitmap still on screen.
+
+### Thumbnail decoding is no longer single file
+
+Every request used to be chained into one strictly serial task, and the comment
+explaining why named the one-entry UOP payload memo: parallel readers evicted
+each other's memo, so each gump inflated twice instead of once. Phase 10
+replaced that memo with a 32 MB least-recently-used window, which retired the
+reason.
+
+Three permits now, through a `SemaphoreSlim`, with a `CancellationTokenSource`
+reset on rebind and cancelled on close. Cancellation is deliberately tied to
+**rebind, not scrolling**: the visible set changes continuously while scrolling
+and cancelling there would discard work about to be wanted, which is what the
+per-tile tag protocol in `BuildThumbnail` already handles.
+
+Concurrency introduced one hazard that had to be closed with it. Two tiles can
+ask for the same id, and `Remember` disposed whatever bitmap it replaced — which
+may already be a realised tile's `Image.Source`. So decodes are now deduplicated
+by id through an in-flight map, and `Remember` *retires* a replaced bitmap into
+the same list a tile-size change uses rather than disposing it. Both dictionaries
+stay UI-thread-only because every await resumes on the dispatcher, which is what
+makes them safe without a lock.
+
+The window also became `IDisposable`, following `MainWindow`: it owns a semaphore
+and a token source now, and the analyzer said so — `CA1001` is promoted to an
+error here, and the comment it replaced had noted that a chained `Task`, unlike a
+semaphore, was not something the window had to dispose.
+
+### A cancelled decode abandoned its tile
+
+Making thumbnail decoding concurrent introduced a worse defect than the one it
+cured, and a user found it: thumbnails appeared only after scrolling away and
+coming back, and the browser felt slower than the serial version it replaced.
+
+Decodes are shared by id so two tiles wanting the same art decode it once.
+Rebinding the list cancels the current generation, which completes those shared
+tasks as cancelled — but the map of running decodes was left populated. A tile
+realised immediately afterwards asked for the same id, was handed the cancelled
+task, caught the cancellation and **gave up permanently**. Nothing retried, so
+the tile stayed empty until its row happened to be realised again. Opening the
+browser reflows once as the real width arrives, so the very first screenful was
+usually the one abandoned.
+
+`CancelDecoding` empties the map now, and `CanJoinDecode` refuses to join a task
+that has already completed unsuccessfully. That predicate is `internal` rather
+than private so it can be tested directly: the browser cannot be driven without
+a client, and the decision is the part worth pinning.
+
+**What the measurements said, including where they contradicted a guess.**
+
+Decoding was never the bottleneck. A screenful of twenty-eight gumps from a
+retail UOP client decodes in **31 ms cold, 1.1 ms each**, against a symptom
+measured in seconds — so the cost was all in the plumbing around it.
+
+The first suspicion was that the permit handshake ran on the dispatcher: a tile
+acquired its slot, hopped back, decoded, hopped back and released, so a screenful
+advanced roughly one dispatcher turn at a time while the dispatcher was busy
+laying out the very scroll that realised those tiles. Those awaits now run
+`ConfigureAwait(false)`, which is right on its own terms — nothing in that scope
+touches a control or the cache — but an A/B against a headless probe measured
+**124 ms versus 127 ms**, i.e. no difference. The probe pumps an idle dispatcher
+in a tight loop, so it cannot reproduce contention with layout. The change is
+kept as a correctness-of-intent improvement, not as a fix, because there is no
+evidence it fixed anything.
+
+### The bitmap type went backwards
+
+Replacing the PNG round-trip was a clear win for decoding and a quiet loss for
+drawing. The round-trip produced an `Avalonia.Media.Imaging.Bitmap`, which is
+immutable; the replacement handed back a `WriteableBitmap`, which is for content
+that changes. A render backend has to assume a writeable bitmap's pixels may
+differ between frames, so it cannot keep the uploaded texture the way it does for
+one declared never to change — and a gallery is static art redrawn on every
+scroll frame, which is the worst case for that. It also fits the report that item
+art felt better than gump art, item tiles being much the smaller upload.
+
+`SkiaBitmap.ToAvalonia` now builds an immutable `Bitmap` from the premultiplied
+intermediate's pointer, so the decode stays a pixel copy and the type goes back
+to what it was. This one is reasoned rather than measured: the cost it removes is
+per-frame texture upload, which needs a GPU, and the headless platform has none.
+
+The headless platform is worth a warning for anyone testing this area. Its
+bitmap stub reports a fabricated `1x1` size and the platform's own pixel format
+regardless of what the constructor was given, so assertions about a bitmap's
+geometry or format there test the stub rather than the code. The premultiply
+behaviour is pinned in plain Skia for that reason, and the geometry is asserted
+on the intermediate.
+
+### The window that would not close
+
+Closing a gallery that had been scrolled left the editor unable to close at all.
+The cause was the concurrency bound itself.
+
+`SemaphoreSlim.Dispose` must not be called while anything is still waiting on
+the semaphore, and closing the browser did exactly that. The queued decodes'
+pending `Release` calls then threw `ObjectDisposedException` from inside a
+`finally`; that faulted the decode task; its awaiter resumed on the dispatcher
+with `ConfigureAwait(true)` and rethrew there; and the handler only caught
+`OperationCanceledException`. An unhandled exception in a dispatcher
+continuation takes the dispatcher with it, which is why the symptom was a
+main window that stopped responding rather than an error.
+
+The semaphore is gone. The bound is a queue and a counter on the UI thread —
+nothing to dispose, no handshake, and the bookkeeping is confined to the same
+thread as the cache it feeds. It was never buying much: a decode is about a
+millisecond and the UOP reader serialises on one lock regardless.
+
+Two rules came out of it, both now written into the code:
+
+- **Nothing started without being awaited may let an exception escape.**
+  `ShowWhenDecodedAsync` catches cancellation, and the IO and disposal faults
+  that a torn-down browser can produce, because there is no caller to receive
+  them — only the dispatcher.
+- **`Dispose` has to be idempotent.** `OnClosed` calls it and so does anything
+  holding the window in a `using`; cancelling an already-disposed token source
+  throws. The first run of the new tests failed on exactly this, which is a fair
+  demonstration that they detect what they are for.
+
+`BrowserTeardownTests` covers it against a real client, in both view modes:
+open, let a screenful start decoding, scroll to abandon it, close, then pump the
+dispatcher and require that it still runs work — and separately that the editor
+itself still closes after browsing art. A headless dispatcher is pumped by hand,
+so a continuation that throws surfaces out of `RunJobs` and fails the test
+outright.
+
+### Evicting a thumbnail must not dispose it
+
+The thumbnail cache carries this instruction on the field itself:
+
+> Entries are dropped rather than disposed: an evicted bitmap may still be on
+> screen, and disposing one out from under a realised `Image` tears a hole in
+> the panel.
+
+Turning the cache from insertion order into least-recently-used disposed the
+evicted entry, breaking that rule in the very field that states it. Eviction
+picks the least recently used, and during a long scroll that bitmap can still be
+the source of a realised `Image` the virtualiser is holding — so the render pass
+was being handed disposed bitmaps, which is consistent with the report that
+reading and rendering thumbnails had become poor.
+
+Eviction drops the reference again and lets the collector decide, because
+whether anything still holds it is precisely what this cache cannot know. The
+bitmaps that genuinely can be released are the ones still held when the window
+closes, which is what `DisposeThumbnails` is for and what the original leak
+actually was.
+
+### A preview pane that can be given room
+
+The art browser docked its preview at a fixed 260 pixels and drew the image at
+native size, so a gump wider than that was cropped with no way to see the rest:
+the pane could not be widened, and the window being resizable did not help
+because the preview never took any of the extra space.
+
+The list and the preview now share a grid with a `GridSplitter` between them.
+Which of the two needs the room depends entirely on what is being looked at —
+gump art runs to several hundred pixels across — so it is not something to
+hard-code either way. The width is remembered in `AppSettings` and saved as the
+drag finishes rather than on close, so it survives the window being dismissed
+with Escape and matches how the tile size and the view mode are already kept the
+moment they change.
+
+The image is `Stretch="Uniform"` with `StretchDirection="DownOnly"`, which is the
+other half of the problem. At native size anything wider than the pane was simply
+cropped; now art that already fits is still drawn pixel for pixel and only
+oversized art is scaled, with nearest-neighbour sampling so it does not turn into
+a blur. That is the same trade the thumbnails have always made.
+
+A stored width is clamped rather than rejected — unlike a dock proportion, any
+width within range is usable, so the nearest one is the right answer. The floor
+exists because a narrower pane shows nothing useful and reads as broken rather
+than collapsed, and the ceiling so a width stored on a wide screen cannot leave
+the art list with no room on a smaller one.
+
+### Gallery rows are still not recycled, and here is why
+
+The gallery template is still built with `supportsRecycling: false`, so every row
+scrolled into view constructs a fresh `StackPanel` and, per tile, a `Border`, a
+`StackPanel`, an `Image`, a `TextBlock`, a tooltip and two handler closures —
+around forty controls per row, discarded on the way out.
+
+It was attempted and deliberately abandoned. `BuildTile` closes over its entry
+for the tag, the tooltip, the highlight and both pointer handlers, and a
+recycling template hands the *same* control a *different* item — so every one of
+those captures goes stale and tiles select the wrong art. That is a correctness
+bug, not a cosmetic one, and fixing it properly means a row control driven by its
+`DataContext`, which then has to interleave correctly with three mechanisms whose
+reasoning is written down: the tag-based thumbnail staleness protocol, including a
+`DetachedFromVisualTree` handler that clears the tag exactly when recycling
+detaches and reattaches; the `RepaintTiles` visual sweep that drives selection
+highlighting; and the explicit row height the extent estimation depends on.
+
+Against that: the cost is control allocation, not a stall — the expensive part,
+the decode, is cached — and there is no way to verify it. The gallery cannot be
+driven headlessly without a client, and a screenful of tiles showing the wrong
+art is the kind of defect only a person looking at it would catch.
+
+Recycling it is worth doing behind a proper seam: lift `ArtEntry` and the row out
+of `ArtBrowserWindow` as internal types, so the row's data-change behaviour can
+be unit-tested directly without scrolling a virtualising list. That is a piece of
+work in its own right rather than a tail end of this one.
+
+### What was deliberately not done
+
+- **No GPU path.** Drawing into Avalonia's own Skia canvas through
+  `ISkiaSharpApiLease`, instead of a private `WriteableBitmap`, would remove the
+  CPU raster and the 3 MB per-frame texture upload. It is **blocked**:
+  `Avalonia.Skia` 12.1.2 is compiled against **SkiaSharp 3.119.4** while this
+  repository pins **4.151.2**, and central transitive pinning unifies that to
+  4.151.2. It works today precisely *because* the application never exchanges
+  Skia objects with Avalonia — the `WriteableBitmap` is what insulates the two.
+  Taking an `SKCanvas` across that boundary means matching Avalonia's SkiaSharp
+  major version. **This skew is a standing risk for the next Avalonia bump**, and
+  is the first thing to check if rendering breaks after one.
+- **No display-list caching.** Recording the static content into an `SKPicture`
+  and replaying it would help selection changes and marquee drags, but during an
+  element drag the content changes every frame, which is the case that matters.
+  The seam exists — `RenderDocument` already separates decorated from undecorated
+  passes — so this stays available.
+- **Clipping to the scroll viewport.** The full surface is still rasterised
+  whatever is scrolled into view. It belongs with the canvas sizing work rather
+  than bolted beside it.
+- **No MVVM refactor.** `MainWindow.axaml.cs` is still imperative, and every
+  action is still registered three times over — menu, shortcut, context menu.
+  `Click`/`ClickAsync` also silently do nothing on a misspelled control name, so
+  a typo yields a dead menu item with no error.
+- **Gallery rows are still built without recycling**, so about forty controls
+  are allocated and discarded per row scrolled into view. Attempted and
+  abandoned deliberately — see *Gallery rows are still not recycled*
+  above for the correctness hazard and the seam it needs.
+- `UoArtSource` still has no tests of its own: it takes a concrete
+  `UoDataContext`, so its cache and eviction cannot be exercised without a
+  client.
+- Page **rename** is still not possible. `GumpPage.Name` is shown in the
+  move-to-page menu and nothing can set it.
+
+---
+
 ## Defect inventory
 
 Verified findings from the audit of `src/`, kept as a regression checklist.
@@ -1349,11 +2040,19 @@ model; quinted is the reference for the POL exporter.**
 
 ## Known gaps
 
-- **The dock layout is not remembered between sessions.** Panels can be moved,
-  tabbed and floated, but the window opens on the layout declared in
-  `MainWindow.axaml` every time. Dock serialises its model; wiring that up means
-  reattaching each panel to its dockable by id after a restore, and a way back
-  to the default when a saved layout is unusable.
+- ~~**The dock layout is not remembered between sessions.**~~ Built in
+  [Phase 10](#phase-10--the-shell-catches-up-): pane proportions, hidden panels
+  and the window's own placement are stored, and a *Reset panel layout* command
+  returns to the declared one. **Tearing a panel off into its own window, or
+  re-tabbing one beside another, is still not remembered** — that needs Dock's
+  own serialiser, which is a reflective dependency this repository publishes
+  with NativeAOT and so declined to adopt.
+- **The SkiaSharp version skew.** `Avalonia.Skia` 12.1.2 is built against
+  SkiaSharp 3.119.4; this repository pins 4.151.2 and central transitive pinning
+  unifies to it. Nothing breaks because the application never hands a Skia
+  object to Avalonia — the canvas blits through a `WriteableBitmap`. It is the
+  first thing to check if rendering misbehaves after an Avalonia bump, and it is
+  what blocks moving the canvas onto `ISkiaSharpApiLease`.
 - **The BWT decoder is only covered by real-client tests**, so CI does not
   exercise it. Closing this needs either a BWT encoder written purely for test
   fixtures, or a small captured byte pair checked in.
@@ -1363,7 +2062,9 @@ model; quinted is the reference for the POL exporter.**
   `UoDataContext.Validate` reports what is missing, and a test asserts it does.
 - **Resolving a UOP gump's dimensions requires decoding it**, because the size
   lives inside the compressed payload. An art browser must therefore virtualise
-  and resolve lazily rather than measuring everything up front.
+  and resolve lazily rather than measuring everything up front. Phase 10 widened
+  the payload memo into a 32 MB least-recently-used window, so a revisited entry
+  is no longer inflated again, but the first look at one still costs a decode.
 - **`dotnet test` does not work on SDK 10.0.400.** It reports `Zero tests ran`
   for every project, reproducibly, including for a one-file xunit.v3 project in
   an empty directory. `eng/run-tests.ps1` launches the test applications

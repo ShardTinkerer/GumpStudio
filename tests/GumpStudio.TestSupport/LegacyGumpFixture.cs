@@ -258,6 +258,29 @@ public static class LegacyGumpFixture
             ("Disposeable", new NrbfBool(disposable)),
             ("Type", new NrbfInt(type)));
 
+    /// <summary>
+    /// Assembles a legacy <c>.gumpling</c> file: one saved group, on its own.
+    /// </summary>
+    /// <remarks>
+    /// Unlike a <c>.gump</c> there is no page list and no properties record —
+    /// the group is the whole file, which is why it loads as an insertion
+    /// rather than as a document.
+    /// </remarks>
+    public static byte[] BuildGumpling(int x = 10, int y = 20, params NrbfValue[] children)
+    {
+        NrbfFixtureWriter writer = new();
+
+        return writer.WriteAll(Group(x, y, children.Length > 0 ? children : [Label(1, 2, "inside")]));
+    }
+
+    /// <summary>Writes a <see cref="BuildGumpling"/> payload to a file.</summary>
+    public static void WriteGumpling(string path, int x = 10, int y = 20, params NrbfValue[] children)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+
+        File.WriteAllBytes(path, BuildGumpling(x, y, children));
+    }
+
     /// <summary>Assembles a complete legacy <c>.gump</c> file.</summary>
     public static byte[] BuildDocument(IEnumerable<NrbfValue> pages, NrbfObject? properties = null)
     {

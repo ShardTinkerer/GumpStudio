@@ -170,10 +170,8 @@ public static class PickerEntries
     private static Bitmap ToBitmap(Argb1555Image rendered)
     {
         using SKBitmap decoded = Rendering.UoImageConverter.ToSkBitmap(rendered.ToUoImage());
-        using SKData encoded = decoded.Encode(SKEncodedImageFormat.Png, 100);
-        using MemoryStream stream = new(encoded.ToArray());
 
-        return new Bitmap(stream);
+        return SkiaBitmap.ToAvalonia(decoded);
     }
 }
 

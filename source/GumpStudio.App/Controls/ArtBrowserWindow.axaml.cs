@@ -1,5 +1,6 @@
 using System.Globalization;
 
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
@@ -7,6 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
@@ -41,7 +43,7 @@ public enum ArtBrowserKind
 /// panel actually realises, and off the UI thread.
 /// </para>
 /// </remarks>
-public sealed partial class ArtBrowserWindow : Window
+public sealed partial class ArtBrowserWindow : Window, IDisposable
 {
     /// <summary>Smallest and largest thumbnail the size control offers.</summary>
     private const int MinTileSize = 32;
@@ -59,6 +61,7 @@ public sealed partial class ArtBrowserWindow : Window
     private readonly List<ArtEntry> _all = [];
     private readonly UoDataContext? _data;
     private readonly ArtBrowserKind _kind;
+    private readonly AppSettings _settings;
 
     private readonly TextBox _filter = null!;
     private readonly ListBox _results = null!;
@@ -68,6 +71,7 @@ public sealed partial class ArtBrowserWindow : Window
     private readonly TextBlock _previewTitle = null!;
     private readonly TextBlock _previewDetail = null!;
     private readonly Image _preview = null!;
+    private readonly Grid _panes = null!;
 
     /// <summary>
     /// Decoded thumbnails, so scrolling back over art costs nothing.
@@ -79,30 +83,93 @@ public sealed partial class ArtBrowserWindow : Window
     /// tears a hole in the panel.
     /// </remarks>
     private readonly Dictionary<int, Bitmap> _thumbnails = [];
-    private readonly Queue<int> _thumbnailOrder = new();
+
+    // Recency order for the thumbnail cache, most recent last, with each id's
+    // node beside it so a touch does not scan the list.
+    private readonly LinkedList<int> _thumbnailOrder = new();
+    private readonly Dictionary<int, LinkedListNode<int>> _thumbnailNodes = [];
+
+    // Bitmaps a tile-size change invalidated, still referenced by tiles on
+    // screen, released when the window closes.
+    private readonly List<Bitmap> _retired = [];
+
+    private DispatcherTimer? _filterDebounce;
 
     /// <summary>
-    /// Serialises decoding, one image at a time.
+    /// How many thumbnails may decode at once.
     /// </summary>
-    /// <value>
-    /// The tail of the queue: each request continues from the previous one.
-    /// Only ever read and written on the UI thread, so it needs no lock, and
-    /// unlike a semaphore it is not something the window has to dispose.
-    /// </value>
     /// <remarks>
-    /// A gallery realises a whole screenful of tiles at once — seventy or so —
-    /// and firing that many decodes concurrently is worse than useless. The UOP
-    /// reader memoises exactly one decompressed entry, and reading a gump takes
-    /// two passes over it: one for its dimensions and one for its pixels.
-    /// Running them in parallel means every thread evicts every other thread's
-    /// memo, so each gump inflates and Burrows-Wheeler-decodes twice instead of
-    /// once, on a flooded thread pool.
+    /// Decoding used to be strictly serial, for a good reason at the time: the
+    /// UOP reader memoised exactly one decompressed entry, and reading a gump
+    /// takes two passes over it — one for its dimensions and one for its pixels.
+    /// Running those in parallel meant every thread evicted every other one's
+    /// memo, so each gump inflated twice instead of once on a flooded pool.
+    ///
+    /// That memo is now a byte-budgeted window of recently decoded payloads, so
+    /// concurrent readers no longer fight over a single slot. A small bound
+    /// rather than none: a gallery realises a whole screenful of tiles at once,
+    /// around seventy, and there is nothing to gain from seventy decodes in
+    /// flight for a screen that holds seventy images.
     /// </remarks>
-    private Task _decodeQueue = Task.CompletedTask;
+    private const int ConcurrentDecodes = 3;
+
+    /// <summary>
+    /// Requests waiting for a decode slot, and how many are using one.
+    /// </summary>
+    /// <remarks>
+    /// A queue and a counter on the UI thread rather than a
+    /// <see cref="SemaphoreSlim"/>, which cost a window that would not close.
+    /// Disposing a semaphore while anything is still waiting on it makes the
+    /// pending <c>Release</c> calls throw <see cref="ObjectDisposedException"/>
+    /// from inside a <c>finally</c>; that faulted the decode task, whose awaiter
+    /// resumed on the dispatcher and rethrew there. An unhandled exception in a
+    /// dispatcher continuation takes the dispatcher with it, so closing a
+    /// gallery that had been scrolled left the main window unable to close at
+    /// all.
+    ///
+    /// Nothing here needs disposing, and the bookkeeping is confined to the UI
+    /// thread like the cache it feeds.
+    /// </remarks>
+    private readonly Queue<(int Id, Image Target)> _pending = new();
+
+    private int _running;
+    private bool _disposed;
+
+    /// <summary>
+    /// Decodes already running, by id.
+    /// </summary>
+    /// <remarks>
+    /// Concurrency makes deduplication a correctness matter rather than an
+    /// efficiency one. Two tiles can ask for the same id, and a second decode
+    /// would hand <see cref="Remember"/> a replacement for a bitmap already
+    /// assigned as an <c>Image.Source</c>. Sharing the task means one decode and
+    /// one cache entry per id.
+    ///
+    /// Touched only on the UI thread, like the cache it feeds.
+    /// </remarks>
+    private readonly Dictionary<int, Task<Bitmap?>> _inFlight = [];
+
+    /// <summary>
+    /// Cancels decoding for a visible set that no longer exists.
+    /// </summary>
+    /// <remarks>
+    /// Reset when the list is rebound — a filter change, a view-mode switch, a
+    /// tile-size change — and cancelled when the window closes. Deliberately
+    /// <em>not</em> on scrolling: the visible set changes continuously there, and
+    /// cancelling would throw away work that is about to be wanted. Per-tile
+    /// staleness during a scroll is what the tag protocol in
+    /// <see cref="BuildThumbnail"/> is for.
+    /// </remarks>
+    private CancellationTokenSource _decodeGeneration = new();
 
     private List<ArtEntry> _matches = [];
     private ArtEntry? _selected;
     private Bitmap? _previewBitmap;
+
+    // Which preview request is current. A superseded decode drops its result
+    // rather than overwriting a newer one, which is what arrow-keying through
+    // the list produces.
+    private int _previewGeneration;
     private int _columns = 1;
     private int _tileSize = 144;
     private double _chunkedWidth = -1;
@@ -114,12 +181,21 @@ public sealed partial class ArtBrowserWindow : Window
     {
     }
 
-    public ArtBrowserWindow(UoDataContext? data, ArtBrowserKind kind, int initialId)
+    /// <param name="settings">
+    /// The editor's shared settings. Null loads a private copy, which is what
+    /// the XAML designer's parameterless constructor needs.
+    /// </param>
+    public ArtBrowserWindow(
+        UoDataContext? data,
+        ArtBrowserKind kind,
+        int initialId,
+        AppSettings? settings = null)
     {
         AvaloniaXamlLoader.Load(this);
 
         _data = data;
         _kind = kind;
+        _settings = settings ?? AppSettings.Load();
 
         _filter = this.FindControl<TextBox>("FilterBox")!;
         _results = this.FindControl<ListBox>("Results")!;
@@ -129,13 +205,16 @@ public sealed partial class ArtBrowserWindow : Window
         _previewTitle = this.FindControl<TextBlock>("PreviewTitle")!;
         _previewDetail = this.FindControl<TextBlock>("PreviewDetail")!;
         _preview = this.FindControl<Image>("PreviewImage")!;
+        _panes = this.FindControl<Grid>("Panes")!;
+
+        RestorePreviewWidth();
 
         Title = kind == ArtBrowserKind.Gump ? "Browse gump art" : "Browse item art";
 
         _results.SelectionChanged += OnListSelectionChanged;
         _results.DoubleTapped += (_, _) => Accept();
 
-        _filter.TextChanged += (_, _) => ApplyFilter();
+        _filter.TextChanged += (_, _) => ScheduleFilter();
 
         // Re-chunking is what keeps a gallery filling the window instead of
         // leaving a ragged column of empty space. LayoutUpdated as well as
@@ -149,13 +228,11 @@ public sealed partial class ArtBrowserWindow : Window
         this.FindControl<Button>("AcceptButton")!.Click += (_, _) => Accept();
         this.FindControl<Button>("CancelButton")!.Click += (_, _) => Close();
 
-        AppSettings settings = AppSettings.Load();
-
-        _tileSize = Math.Clamp(settings.ArtBrowserTileSize, MinTileSize, MaxTileSize);
+        _tileSize = Math.Clamp(_settings.ArtBrowserTileSize, MinTileSize, MaxTileSize);
         _tileSizeBox.Value = _tileSize;
         _tileSizeBox.ValueChanged += (_, _) => ApplyTileSize();
 
-        _galleryToggle.IsChecked = settings.ArtBrowserGallery;
+        _galleryToggle.IsChecked = _settings.ArtBrowserGallery;
 
         ApplyViewMode(remember: false);
         Populate(initialId);
@@ -163,6 +240,44 @@ public sealed partial class ArtBrowserWindow : Window
 
     /// <summary>The chosen id, or null when the dialog was cancelled.</summary>
     public int? SelectedId { get; private set; }
+
+    /// <summary>The preview pane, in pixels, as it is on screen.</summary>
+    internal double PreviewWidth => _panes.ColumnDefinitions[PreviewColumn].Width.Value;
+
+    /// <summary>Which grid column the preview occupies.</summary>
+    private const int PreviewColumn = 2;
+
+    /// <summary>
+    /// Sizes the preview pane from the remembered width, and keeps it.
+    /// </summary>
+    /// <remarks>
+    /// Saved as the drag finishes rather than on close, so it survives the
+    /// window being dismissed with Escape, and matches how the tile size and the
+    /// view mode are already remembered the moment they change.
+    /// </remarks>
+    private void RestorePreviewWidth()
+    {
+        _panes.ColumnDefinitions[PreviewColumn].Width =
+            new GridLength(_settings.UsablePreviewWidth(), GridUnitType.Pixel);
+
+        if (this.FindControl<GridSplitter>("PreviewSplitter") is { } splitter)
+        {
+            splitter.DragCompleted += (_, _) => SavePreviewWidth();
+        }
+    }
+
+    private void SavePreviewWidth()
+    {
+        int width = (int)Math.Round(_panes.ColumnDefinitions[PreviewColumn].ActualWidth);
+
+        if (width < AppSettings.MinPreviewWidth || width > AppSettings.MaxPreviewWidth)
+        {
+            return;
+        }
+
+        _settings.ArtBrowserPreviewWidth = width;
+        _settings.Save();
+    }
 
     private bool IsGallery => _galleryToggle.IsChecked == true;
 
@@ -244,11 +359,8 @@ public sealed partial class ArtBrowserWindow : Window
 
         if (remember)
         {
-            AppSettings settings = AppSettings.Load();
-
-            settings.ArtBrowserGallery = IsGallery;
-
-            AppSettings.Save(settings);
+            _settings.ArtBrowserGallery = IsGallery;
+            _settings.Save();
         }
     }
 
@@ -269,8 +381,7 @@ public sealed partial class ArtBrowserWindow : Window
 
         _tileSize = requested;
 
-        _thumbnails.Clear();
-        _thumbnailOrder.Clear();
+        RetireThumbnails();
 
         Rebind();
 
@@ -279,11 +390,34 @@ public sealed partial class ArtBrowserWindow : Window
             ScrollTo(_selected);
         }
 
-        AppSettings settings = AppSettings.Load();
+        _settings.ArtBrowserTileSize = _tileSize;
+        _settings.Save();
+    }
 
-        settings.ArtBrowserTileSize = _tileSize;
+    /// <summary>
+    /// Re-filters after a short pause in typing.
+    /// </summary>
+    /// <remarks>
+    /// The item browser holds forty thousand entries, and filtering walks every
+    /// one, rebuilds the match list and re-chunks every gallery row. Running
+    /// that on each keystroke made typing a four-character id feel like four
+    /// separate stalls.
+    /// </remarks>
+    private void ScheduleFilter()
+    {
+        _filterDebounce ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
 
-        AppSettings.Save(settings);
+        _filterDebounce.Stop();
+        _filterDebounce.Tick -= OnFilterTick;
+        _filterDebounce.Tick += OnFilterTick;
+        _filterDebounce.Start();
+    }
+
+    private void OnFilterTick(object? sender, EventArgs e)
+    {
+        _filterDebounce?.Stop();
+
+        ApplyFilter();
     }
 
     private void ApplyFilter()
@@ -310,6 +444,9 @@ public sealed partial class ArtBrowserWindow : Window
     /// </remarks>
     private void Rebind()
     {
+        // Whatever was queued was for a visible set that no longer exists.
+        CancelDecoding();
+
         _results.ItemsSource = null;
 
         if (!IsGallery)
@@ -427,8 +564,12 @@ public sealed partial class ArtBrowserWindow : Window
             return entry.Id == hex;
         }
 
-        return entry.Id.ToString(CultureInfo.InvariantCulture)
-            .Contains(query, StringComparison.Ordinal);
+        // Formatted into a stack buffer: this runs once per entry per filter,
+        // and the browser holds tens of thousands of them.
+        Span<char> digits = stackalloc char[12];
+
+        return entry.Id.TryFormat(digits, out int written, provider: CultureInfo.InvariantCulture)
+            && digits[..written].Contains(query, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -554,6 +695,8 @@ public sealed partial class ArtBrowserWindow : Window
             // Straight from the cache: no await, so a re-scroll does not flicker
             // through a frame of empty tiles.
             thumbnail.Source = cached;
+
+            Touch(entry.Id);
         }
         else
         {
@@ -648,51 +791,279 @@ public sealed partial class ArtBrowserWindow : Window
 
     private void LoadThumbnailAsync(int id, Image target)
     {
-        _decodeQueue = Continue(_decodeQueue);
-
-        async Task Continue(Task previous)
+        if (_disposed)
         {
-            await previous.ConfigureAwait(true);
+            return;
+        }
 
-            // Scrolling fast queues far more work than it consumes. By the time a
-            // request reaches the front, its tile has usually been reused or
-            // dropped, and decoding for it would only delay the tiles on screen.
+        _pending.Enqueue((id, target));
+
+        PumpDecodes();
+    }
+
+    /// <summary>Starts as many queued decodes as the bound allows.</summary>
+    private void PumpDecodes()
+    {
+        while (!_disposed && _running < ConcurrentDecodes && _pending.Count > 0)
+        {
+            (int id, Image target) = _pending.Dequeue();
+
+            // Scrolling fast queues far more work than it consumes. By the time
+            // a request is served, its tile has often been reused or dropped,
+            // and decoding for it would only delay the tiles on screen.
             if (!IsWanted(target, id))
+            {
+                continue;
+            }
+
+            if (_thumbnails.TryGetValue(id, out Bitmap? cached))
+            {
+                Touch(id);
+                target.Source = cached;
+
+                continue;
+            }
+
+            _running++;
+
+            _ = ShowWhenDecodedAsync(id, target, _decodeGeneration.Token);
+        }
+    }
+
+    /// <summary>
+    /// Waits for one thumbnail and puts it in its tile.
+    /// </summary>
+    /// <remarks>
+    /// Nothing may escape this method. It is started without being awaited, so
+    /// an exception here surfaces on the dispatcher rather than to a caller, and
+    /// an unhandled exception in a dispatcher continuation takes the dispatcher
+    /// with it — which is how a scrolled gallery once left the whole application
+    /// unable to close.
+    /// </remarks>
+    private async Task ShowWhenDecodedAsync(int id, Image target, CancellationToken token)
+    {
+        try
+        {
+            // The one hop back to the UI thread: the cache and the control below
+            // are its business alone.
+            Bitmap? bitmap = await DecodeSharedAsync(id, token).ConfigureAwait(true);
+
+            if (_disposed || bitmap is null || token.IsCancellationRequested)
             {
                 return;
             }
 
-            if (!_thumbnails.TryGetValue(id, out Bitmap? bitmap))
+            // Another tile may have finished the same id first; Remember keeps
+            // whichever arrived and retires the other rather than disposing it.
+            if (!_thumbnails.ContainsKey(id))
             {
-                bitmap = await Task.Run(() => DecodeThumbnail(id)).ConfigureAwait(true);
-
-                if (bitmap is null)
-                {
-                    return;
-                }
-
                 Remember(id, bitmap);
             }
 
             if (IsWanted(target, id))
             {
-                target.Source = bitmap;
+                target.Source = _thumbnails.TryGetValue(id, out Bitmap? stored) ? stored : bitmap;
             }
         }
+        catch (OperationCanceledException)
+        {
+            // The visible set moved on.
+        }
+        catch (Exception ex) when (ex is IOException
+            or InvalidDataException
+            or ObjectDisposedException)
+        {
+            // Art that cannot be read leaves its tile empty, which is what the
+            // missing-art case has always looked like here.
+        }
+        finally
+        {
+            _running--;
+            _inFlight.Remove(id);
+
+            PumpDecodes();
+        }
+    }
+
+    /// <summary>
+    /// Decodes one thumbnail, joining a decode already running for that id.
+    /// </summary>
+    /// <remarks>
+    /// Every await inside runs <c>ConfigureAwait(false)</c>, and that is the
+    /// whole point of this method rather than a detail of it.
+    ///
+    /// The first version waited for its permit and released it on the
+    /// dispatcher. A screenful of tiles then advanced at roughly one dispatcher
+    /// turn each — acquire, hop back, decode, hop back, release, let the next
+    /// waiter hop back — and since the dispatcher is simultaneously laying out
+    /// the scroll that realised those tiles, filling a screen took seconds for
+    /// about thirty milliseconds of actual decoding.
+    ///
+    /// Nothing here touches a control or the cache, so none of it needs the UI
+    /// thread. The single hop back happens in the caller, once, to assign the
+    /// image.
+    /// </remarks>
+    private Task<Bitmap?> DecodeSharedAsync(int id, CancellationToken token)
+    {
+        // Only joined if it is still going to produce something. A task that
+        // has already been cancelled must never be handed to a new caller: the
+        // caller would catch the cancellation and give up, leaving the tile
+        // blank until its row happened to be realised again — which is what
+        // "scroll away and come back and the art appears" looked like.
+        if (_inFlight.TryGetValue(id, out Task<Bitmap?>? running) && CanJoinDecode(running))
+        {
+            return running;
+        }
+
+        Task<Bitmap?> started = DecodeAsync();
+
+        // Added on the UI thread, so two tiles cannot both start one.
+        _inFlight[id] = started;
+
+        return started;
+
+        // The bound is applied by the caller, so there is nothing to acquire
+        // and nothing to release. Removal from the map happens on the UI thread
+        // in ShowWhenDecodedAsync.
+        Task<Bitmap?> DecodeAsync() => Task.Run(() => DecodeThumbnail(id), token);
+    }
+
+    /// <summary>
+    /// Whether a decode already under way is worth waiting for.
+    /// </summary>
+    /// <remarks>
+    /// A task that has already been cancelled must never be handed to a new
+    /// caller: the caller would catch the cancellation and give up, leaving the
+    /// tile blank until its row happened to be realised again.
+    /// </remarks>
+    internal static bool CanJoinDecode(Task decode)
+    {
+        ArgumentNullException.ThrowIfNull(decode);
+
+        return !decode.IsCanceled && !decode.IsFaulted;
     }
 
     /// <summary>True while a control still wants this id and has not been discarded.</summary>
     private static bool IsWanted(Image target, int id) =>
         target.Tag is int wanted && wanted == id;
 
+    /// <summary>
+    /// Caches a decoded thumbnail, evicting the least recently used.
+    /// </summary>
+    /// <remarks>
+    /// Least recently used rather than first in: insertion order threw away
+    /// exactly what was about to be wanted again, because scrolling down and
+    /// back up asks for the earliest entries last.
+    ///
+    /// An evicted entry is dropped, not disposed, which is the rule stated on
+    /// <see cref="_thumbnails"/> and worth restating because breaking it is
+    /// invisible in a test: eviction picks the least recently used, and during a
+    /// long scroll that bitmap can still be the source of a realised
+    /// <see cref="Image"/> the virtualiser is holding. Disposing it tears a hole
+    /// in the panel and can throw from inside the render pass. Whether anything
+    /// still references it is exactly what this cache cannot know, so the
+    /// reference is released and the collector decides.
+    ///
+    /// The bitmaps that *can* safely be disposed are the ones held when the
+    /// window closes, which <see cref="DisposeThumbnails"/> does.
+    /// </remarks>
     private void Remember(int id, Bitmap bitmap)
     {
-        _thumbnails[id] = bitmap;
-        _thumbnailOrder.Enqueue(id);
-
-        while (_thumbnailOrder.Count > ThumbnailCacheLimit)
+        // Replacing one: its reference is dropped, never disposed, for the same
+        // reason an evicted one is. The value is deliberately not taken out of
+        // the dictionary into a local, so that nothing here even holds a
+        // disposable to be tempted by.
+        if (_thumbnails.ContainsKey(id))
         {
-            _thumbnails.Remove(_thumbnailOrder.Dequeue());
+            if (_thumbnailNodes.Remove(id, out LinkedListNode<int>? stale))
+            {
+                _thumbnailOrder.Remove(stale);
+            }
+
+            _thumbnails.Remove(id);
+        }
+
+        _thumbnails[id] = bitmap;
+        _thumbnailNodes[id] = _thumbnailOrder.AddLast(id);
+
+        while (_thumbnailOrder.Count > ThumbnailCacheLimit && _thumbnailOrder.First is { } oldest)
+        {
+            int evictedId = oldest.Value;
+
+            _thumbnailOrder.RemoveFirst();
+            _thumbnailNodes.Remove(evictedId);
+            _thumbnails.Remove(evictedId);
+        }
+    }
+
+    /// <summary>
+    /// Empties the thumbnail cache without releasing its bitmaps yet.
+    /// </summary>
+    /// <remarks>
+    /// Used when the tile size changes, which invalidates every cached bitmap
+    /// because they were scaled to the old size. They cannot be disposed here:
+    /// tiles already on screen still have them as their <c>Image.Source</c> and
+    /// are only replaced when the rebind that follows has been laid out. They
+    /// are held instead, and released when the window closes.
+    /// </remarks>
+    private void RetireThumbnails()
+    {
+        _retired.AddRange(_thumbnails.Values);
+
+        _thumbnails.Clear();
+        _thumbnailOrder.Clear();
+        _thumbnailNodes.Clear();
+    }
+
+    /// <summary>
+    /// Releases every thumbnail this browser decoded.
+    /// </summary>
+    /// <remarks>
+    /// Each holds unmanaged pixel memory, and a browser is constructed afresh on
+    /// every browse click. Only the preview used to be released, leaving all the
+    /// rest to their finalizers.
+    /// </remarks>
+    private void DisposeThumbnails()
+    {
+        foreach (Bitmap thumbnail in _thumbnails.Values)
+        {
+            thumbnail.Dispose();
+        }
+
+        foreach (Bitmap thumbnail in _retired)
+        {
+            thumbnail.Dispose();
+        }
+
+        _thumbnails.Clear();
+        _thumbnailOrder.Clear();
+        _thumbnailNodes.Clear();
+        _retired.Clear();
+    }
+
+    /// <summary>Abandons in-flight decodes and begins a new generation.</summary>
+    /// <remarks>
+    /// The map of running decodes is emptied along with the token, or the next
+    /// request for one of those ids would join a task that is about to report
+    /// cancellation and abandon its tile for good.
+    /// </remarks>
+    private void CancelDecoding()
+    {
+        _decodeGeneration.Cancel();
+        _decodeGeneration.Dispose();
+        _decodeGeneration = new CancellationTokenSource();
+
+        _pending.Clear();
+        _inFlight.Clear();
+    }
+
+    /// <summary>Marks a cached thumbnail as just used.</summary>
+    private void Touch(int id)
+    {
+        if (_thumbnailNodes.TryGetValue(id, out LinkedListNode<int>? node))
+        {
+            _thumbnailOrder.Remove(node);
+            _thumbnailOrder.AddLast(node);
         }
     }
 
@@ -721,7 +1092,7 @@ public sealed partial class ArtBrowserWindow : Window
 
         if (longest <= _tileSize)
         {
-            return Encode(decoded);
+            return SkiaBitmap.ToAvalonia(decoded);
         }
 
         double scale = (double)_tileSize / longest;
@@ -734,52 +1105,97 @@ public sealed partial class ArtBrowserWindow : Window
                 decoded.AlphaType),
             new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None));
 
-        return scaled is null ? Encode(decoded) : Encode(scaled);
-    }
-
-    private static Bitmap Encode(SKBitmap bitmap)
-    {
-        using SKData encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100);
-        using MemoryStream stream = new(encoded.ToArray());
-
-        return new Bitmap(stream);
+        return scaled is null ? SkiaBitmap.ToAvalonia(decoded) : SkiaBitmap.ToAvalonia(scaled);
     }
 
     private UoImage? Load(int id) => _kind == ArtBrowserKind.Gump
         ? _data?.GetGump(id)
         : _data?.GetStatic(id);
 
-    /// <summary>Decodes art at full size, for the preview panel.</summary>
-    private Bitmap? Decode(int id)
-    {
-        UoImage? image = Load(id);
-
-        return image is null ? null : Encode(Rendering.UoImageConverter.ToSkBitmap(image));
-    }
-
+    /// <summary>
+    /// Shows the selected art at full size.
+    /// </summary>
+    /// <remarks>
+    /// The decode runs on the pool. It is a full inflate, Burrows-Wheeler pass
+    /// and RLE decode of full-size art, and this is reached from every click and
+    /// every arrow-key move through the list, so doing it inline stalled the
+    /// window once per keypress and contended with the background thumbnail
+    /// decoder for the same container.
+    ///
+    /// Arrow-keying produces a burst of these, so each carries a generation
+    /// number and only the newest result is allowed to land. The title and the
+    /// id appear immediately; only the image and its dimensions wait.
+    /// </remarks>
     private void UpdatePreview()
     {
-        _previewBitmap?.Dispose();
-        _previewBitmap = null;
+        int generation = ++_previewGeneration;
 
         if (_selected is not { } entry)
         {
-            _previewTitle.Text = "Nothing selected";
-            _previewDetail.Text = string.Empty;
-            _preview.Source = null;
+            ClearPreview();
 
             return;
         }
 
         _previewTitle.Text = entry.Display;
-        _previewBitmap = Decode(entry.Id);
-        _preview.Source = _previewBitmap;
+        _previewDetail.Text = string.Create(CultureInfo.InvariantCulture, $"0x{entry.Id:X4}");
 
-        _previewDetail.Text = _previewBitmap is null
-            ? "Could not decode this art."
-            : string.Create(
-                CultureInfo.InvariantCulture,
-                $"{_previewBitmap.PixelSize.Width} x {_previewBitmap.PixelSize.Height}  ·  0x{entry.Id:X4}");
+        _ = ShowAsync(entry, generation);
+
+        async Task ShowAsync(ArtEntry showing, int forGeneration)
+        {
+            UoImage? image;
+
+            try
+            {
+                image = await Task.Run(() => Load(showing.Id)).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            // Superseded while decoding, or the window has gone.
+            if (forGeneration != _previewGeneration)
+            {
+                return;
+            }
+
+            Bitmap? decoded = null;
+
+            if (image is not null)
+            {
+                using SKBitmap bitmap = Rendering.UoImageConverter.ToSkBitmap(image);
+
+                decoded = SkiaBitmap.ToAvalonia(bitmap);
+            }
+
+            // Assigned before the previous one is released, so the pane never
+            // blanks between two selections and nothing disposes a bitmap that
+            // is still on screen.
+            Bitmap? previous = _previewBitmap;
+
+            _previewBitmap = decoded;
+            _preview.Source = decoded;
+
+            previous?.Dispose();
+
+            _previewDetail.Text = decoded is null
+                ? "Could not decode this art."
+                : string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"{decoded.PixelSize.Width} x {decoded.PixelSize.Height}  ·  0x{showing.Id:X4}");
+        }
+    }
+
+    private void ClearPreview()
+    {
+        _previewTitle.Text = "Nothing selected";
+        _previewDetail.Text = string.Empty;
+        _preview.Source = null;
+
+        _previewBitmap?.Dispose();
+        _previewBitmap = null;
     }
 
     private void Accept()
@@ -796,7 +1212,46 @@ public sealed partial class ArtBrowserWindow : Window
     {
         base.OnClosed(e);
 
+        Dispose();
+    }
+
+    /// <summary>
+    /// Releases the decoded art and the decoding machinery.
+    /// </summary>
+    /// <remarks>
+    /// Called from <see cref="OnClosed"/> rather than left to a caller: a
+    /// browser is constructed afresh on every browse click and shown as a
+    /// modal, so closing is the only moment it is finished with.
+    /// </remarks>
+    public void Dispose()
+    {
+        // Idempotent: OnClosed calls this, and so does anything holding the
+        // window in a using. Cancelling an already-disposed token source throws.
+        if (_disposed)
+        {
+            return;
+        }
+
+        // Set before anything is released, so a decode that finishes afterwards
+        // returns without touching a disposed bitmap or a dead control.
+        _disposed = true;
+
+        // Moves the generation past anything in flight, for the preview.
+        _previewGeneration++;
+
+        _decodeGeneration.Cancel();
+
+        _pending.Clear();
+        _inFlight.Clear();
+
         _previewBitmap?.Dispose();
+        _previewBitmap = null;
+
+        DisposeThumbnails();
+
+        _filterDebounce?.Stop();
+
+        _decodeGeneration.Dispose();
     }
 
     /// <summary>One entry in the browser.</summary>

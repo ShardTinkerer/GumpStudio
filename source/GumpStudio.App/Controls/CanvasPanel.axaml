@@ -7,8 +7,10 @@
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="_pageTabs"
                 Background="#26262A" Spacing="2" />
 
-    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-      <controls:GumpCanvas Name="_canvas" Width="1024" Height="768"
+    <!-- The canvas sizes itself from its design area and its zoom. -->
+    <ScrollViewer Name="_scroller"
+                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+      <controls:GumpCanvas Name="_canvas"
                            HorizontalAlignment="Left" VerticalAlignment="Top" />
     </ScrollViewer>
   </DockPanel>
