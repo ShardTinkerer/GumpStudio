@@ -35,9 +35,10 @@
     deliberately never activates a type.
 
     IL2104 and IL3053 are the per-assembly roll-ups, raised for Nrbf and for
-    Dock. Dock's Fluent theme binds a dockable's title and close button by name
-    rather than with compiled bindings, and its container generator reflects
-    over whatever an ItemsSource hands it. All of it is library code that this
+    Dock. Dock builds the data templates behind a dockable's title and close
+    button with bindings written as strings rather than compiled ones, and its
+    container generator reflects over whatever an ItemsSource hands it. Neither
+    depends on which Dock theme is in use. All of it is library code that this
     repository cannot annotate; the published binaries are run by hand after a
     dependency bump.
 

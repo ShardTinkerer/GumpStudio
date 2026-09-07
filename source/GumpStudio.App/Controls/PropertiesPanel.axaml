@@ -3,15 +3,16 @@
              x:Class="GumpStudio.App.Controls.PropertiesPanel">
 
   <!--
-    AllowAutoHide off, and a right margin on the content to match. The Fluent
-    scroll bar floats over what it is scrolling by default, which put it on top
-    of the browse button at the end of an id row.
+    Nothing here fends off the scroll bar any more. Under Fluent it floated over
+    what it was scrolling and landed on the browse button at the end of an id
+    row, which cost an AllowAutoHide="False" and a matching right margin. The
+    Simple theme gives it a column of its own, so the rows simply end where it
+    begins.
   -->
-  <ScrollViewer AllowAutoHide="False"
-                VerticalScrollBarVisibility="Auto"
+  <ScrollViewer VerticalScrollBarVisibility="Auto"
                 HorizontalScrollBarVisibility="Disabled"
                 Padding="6">
-    <StackPanel Name="_rows" Spacing="4" Margin="0,0,10,0" />
+    <StackPanel Name="_rows" Spacing="4" />
   </ScrollViewer>
 
 </UserControl>

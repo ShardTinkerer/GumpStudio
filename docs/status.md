@@ -1095,6 +1095,36 @@ built cannot ride along in the archive.
 Still missing: there is no `LICENSE` file in this repository, and these
 workflows put binaries in front of the public.
 
+### The Simple theme, and two workarounds it retires
+
+Fluent was never chosen so much as inherited — it is what a new Avalonia project
+starts with. This is a tool for laying out a 1997 client's interface, and its own
+chrome had drifted a long way from the thing being edited: rounded corners,
+animated controls, and generous padding around a canvas that wants the space.
+
+`SimpleTheme` and `DockSimpleTheme` replace `FluentTheme` and `DockFluentTheme`.
+Sharper, denser, and closer in spirit to the artwork on screen.
+
+It also deletes work rather than adding it. Two accommodations existed purely
+because of how Fluent draws a scroll bar:
+
+- The **floating scroll bar**, drawn over the content it scrolls, landed on the
+  `…` button at the end of a gump- or item-id row. That cost the property
+  scroller an `AllowAutoHide="False"` and its content a matching right margin.
+  The Simple theme's `ScrollViewer` gives the bar a grid column of its own, so
+  the rows end where the bar begins and both are gone.
+- The **hairline scroll bar** that only animated to full width on hover, which is
+  a poor trade in a picker where you scroll far more than you point. Forcing it
+  wider took five styles in `App.axaml`, one of them reaching into Fluent's
+  template for a `Rectangle#TrackRect` that the Simple theme does not have. The
+  Simple bar is a classic bar with line buttons at full width already, so all
+  five are gone.
+
+The theme swap touches nothing else. The hard-coded panel colours were picked to
+sit against a dark shell and still do, and the AOT suppressions did not move: the
+Simple theme binds a dockable's title the same way its Fluent sibling did, and
+the published binary was rebuilt to confirm it.
+
 ## Defect inventory
 
 Verified findings from the audit of `src/`, kept as a regression checklist.
