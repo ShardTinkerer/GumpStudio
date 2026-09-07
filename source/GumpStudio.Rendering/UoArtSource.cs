@@ -18,19 +18,49 @@ namespace GumpStudio.Rendering;
 /// </remarks>
 public sealed class UoArtSource : IGumpArtSource, IDisposable
 {
-    private readonly UoDataContext _data;
-    private readonly Dictionary<ArtKey, SKImage?> _cache = [];
-    private readonly LinkedList<ArtKey> _order = [];
-    private readonly Lock _sync = new();
-    private readonly int _capacity;
+    /// <summary>
+    /// How much decoded art to keep, in bytes.
+    /// </summary>
+    /// <remarks>
+    /// A byte budget rather than a count. Entries here differ enormously in
+    /// size — a nine-slice corner is a few hundred bytes and a full-window
+    /// background is megabytes — so a fixed number of entries either wasted the
+    /// cache on small art or held hundreds of megabytes of large art.
+    /// </remarks>
+    public const long DefaultBudget = 64L * 1024 * 1024;
 
-    public UoArtSource(UoDataContext data, int capacity = 512)
+    private readonly UoDataContext _data;
+    private readonly Dictionary<ArtKey, Entry> _cache = [];
+
+    // The recency order, plus each key's node in it, so a cache hit is O(1).
+    // Looking the node up by value made every hit a linear scan of the list,
+    // under the lock, on every art draw of every frame.
+    private readonly LinkedList<ArtKey> _order = [];
+    private readonly Dictionary<ArtKey, LinkedListNode<ArtKey>> _nodes = [];
+
+    private readonly Lock _sync = new();
+    private readonly long _budget;
+    private long _bytes;
+
+    public UoArtSource(UoDataContext data, long budget = DefaultBudget)
     {
         ArgumentNullException.ThrowIfNull(data);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(capacity);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(budget);
 
         _data = data;
-        _capacity = capacity;
+        _budget = budget;
+    }
+
+    /// <summary>Bytes of decoded art currently held.</summary>
+    public long CachedBytes
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _bytes;
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -73,13 +103,15 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
     {
         lock (_sync)
         {
-            foreach (SKImage? image in _cache.Values)
+            foreach (Entry entry in _cache.Values)
             {
-                image?.Dispose();
+                entry.Image?.Dispose();
             }
 
             _cache.Clear();
             _order.Clear();
+            _nodes.Clear();
+            _bytes = 0;
         }
     }
 
@@ -87,23 +119,36 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
     {
         lock (_sync)
         {
-            if (_cache.TryGetValue(key, out SKImage? cached))
+            if (_cache.TryGetValue(key, out Entry cached))
             {
                 Touch(key);
 
-                return cached;
+                return cached.Image;
             }
 
             SKImage? image = Decode(key);
+            long size = SizeOf(image);
 
-            _cache[key] = image;
-            _order.AddLast(key);
+            _cache[key] = new Entry(image, size);
+            _nodes[key] = _order.AddLast(key);
+            _bytes += size;
 
             Evict();
 
             return image;
         }
     }
+
+    /// <summary>
+    /// What an image costs the budget.
+    /// </summary>
+    /// <remarks>
+    /// Four bytes a pixel, which is what the decoders produce. A miss is still
+    /// charged a nominal amount, so that a page referencing thousands of absent
+    /// ids cannot fill the dictionary for free.
+    /// </remarks>
+    private static long SizeOf(SKImage? image) =>
+        image is null ? 64 : (long)image.Width * image.Height * 4;
 
     private SKImage? Decode(ArtKey key)
     {
@@ -176,19 +221,30 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
 
     private void Touch(ArtKey key)
     {
-        _order.Remove(key);
-        _order.AddLast(key);
+        if (!_nodes.TryGetValue(key, out LinkedListNode<ArtKey>? node))
+        {
+            return;
+        }
+
+        _order.Remove(node);
+        _order.AddLast(node);
     }
 
     private void Evict()
     {
-        while (_cache.Count > _capacity && _order.First is { } oldest)
+        // One entry always stays, so an image larger than the whole budget is
+        // still usable rather than being decoded and dropped on every draw.
+        while (_bytes > _budget && _cache.Count > 1 && _order.First is { } oldest)
         {
-            _order.RemoveFirst();
+            ArtKey key = oldest.Value;
 
-            if (_cache.Remove(oldest.Value, out SKImage? image))
+            _order.RemoveFirst();
+            _nodes.Remove(key);
+
+            if (_cache.Remove(key, out Entry entry))
             {
-                image?.Dispose();
+                _bytes -= entry.Bytes;
+                entry.Image?.Dispose();
             }
         }
     }
@@ -204,4 +260,7 @@ public sealed class UoArtSource : IGumpArtSource, IDisposable
     }
 
     private readonly record struct ArtKey(ArtKind Kind, int Id, int Hue, bool PartialHue, string? Text);
+
+    /// <summary>A cached image and what it costs the budget.</summary>
+    private readonly record struct Entry(SKImage? Image, long Bytes);
 }

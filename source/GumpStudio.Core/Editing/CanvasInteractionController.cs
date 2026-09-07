@@ -107,6 +107,16 @@ public sealed class CanvasInteractionController(UndoHistory history)
     /// <summary>True while a gesture is in progress.</summary>
     public bool IsDragging => Mode != DragMode.None;
 
+    /// <summary>
+    /// The side of a resize handle, in gump units.
+    /// </summary>
+    /// <remarks>
+    /// The canvas raises this as it zooms out, so a handle stays the same size
+    /// under the pointer as it is on screen. Hit testing and drawing read the
+    /// same number, or a handle would not be where it appears.
+    /// </remarks>
+    public int HandleSize { get; set; } = HandleGeometry.HandleSize;
+
     /// <summary>Raised whenever the selection or an element's geometry changes.</summary>
     public event EventHandler? Changed;
 
@@ -121,7 +131,8 @@ public sealed class CanvasInteractionController(UndoHistory history)
         // Reversed: later children draw in front, so they are hit first.
         foreach (Element element in Descending())
         {
-            if (HandleGeometry.HitTest(element.GetAbsoluteBounds(), at, element.IsResizable) != DragMode.None)
+            if (HandleGeometry.HitTest(element.GetAbsoluteBounds(), at, element.IsResizable, HandleSize)
+                != DragMode.None)
             {
                 return element;
             }
@@ -149,7 +160,8 @@ public sealed class CanvasInteractionController(UndoHistory history)
                 continue;
             }
 
-            DragMode handle = HandleGeometry.HitTest(selected.GetAbsoluteBounds(), at, resizable: true);
+            DragMode handle =
+                HandleGeometry.HitTest(selected.GetAbsoluteBounds(), at, resizable: true, HandleSize);
 
             if (HandleGeometry.IsResize(handle))
             {

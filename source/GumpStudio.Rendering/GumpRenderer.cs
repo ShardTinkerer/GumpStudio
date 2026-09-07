@@ -41,6 +41,24 @@ public sealed record RenderOptions
     /// <summary>The design grid to draw, or null for none.</summary>
     public Core.Editing.GridSettings? Grid { get; init; }
 
+    /// <summary>
+    /// The side of a resize handle, in gump units.
+    /// </summary>
+    /// <remarks>
+    /// Grows as the canvas zooms out, so a handle keeps a constant size on
+    /// screen. It has to match what the interaction controller hit tests with.
+    /// </remarks>
+    public int HandleSize { get; init; } = Core.Geometry.HandleGeometry.HandleSize;
+
+    /// <summary>
+    /// Width of a selection outline, in gump units.
+    /// </summary>
+    /// <remarks>
+    /// Zero asks Skia for a hairline, which is one device pixel whatever the
+    /// transform — exactly what a selection outline wants when zoomed in.
+    /// </remarks>
+    public float OutlineWidth { get; init; } = 1;
+
     /// <summary>Plain output with no editor decoration, for export and golden images.</summary>
     public static RenderOptions Plain { get; } = new() { DrawSelection = false, DrawGroupOutlines = false };
 }
@@ -73,18 +91,41 @@ public sealed class GumpRenderer(IGumpArtSource art)
 
         DrawGrid(canvas, options);
 
-        ElementPainter painter = new(canvas, _art, options);
-
-        foreach (Element child in page.Root.Children)
+        using (ElementPainter painter = new(canvas, _art, options))
         {
-            painter.Paint(child);
+            foreach (Element child in page.Root.Children)
+            {
+                painter.Paint(child);
+            }
         }
 
         if (options.DrawSelection)
         {
-            foreach (Element element in page.Descendants().Where(e => e.IsSelected))
+            DrawSelectionOf(canvas, page.Root, options);
+        }
+    }
+
+    /// <summary>
+    /// Draws the decoration for every selected element in a subtree.
+    /// </summary>
+    /// <remarks>
+    /// A plain recursive walk rather than <c>Descendants().Where(...)</c>: this
+    /// runs on every repaint, and the LINQ form built an iterator chain and a
+    /// closure over the whole tree to find the one or two elements that are
+    /// usually selected.
+    /// </remarks>
+    private static void DrawSelectionOf(SKCanvas canvas, GroupElement group, RenderOptions options)
+    {
+        foreach (Element child in group.Children)
+        {
+            if (child.IsSelected)
             {
-                DrawSelection(canvas, element);
+                DrawSelection(canvas, child, options);
+            }
+
+            if (child is GroupElement nested)
+            {
+                DrawSelectionOf(canvas, nested, options);
             }
         }
     }
@@ -161,8 +202,8 @@ public sealed class GumpRenderer(IGumpArtSource art)
             return;
         }
 
-        // A grid finer than a couple of pixels turns into a solid wash and costs
-        // a draw call per dot, so stop drawing rather than produce noise.
+        // A grid finer than a couple of pixels turns into a solid wash, so stop
+        // drawing rather than produce noise.
         const int MinimumVisibleSpacing = 3;
 
         if (grid.Width < MinimumVisibleSpacing || grid.Height < MinimumVisibleSpacing)
@@ -170,15 +211,21 @@ public sealed class GumpRenderer(IGumpArtSource art)
             return;
         }
 
-        using SKPaint paint = new() { Color = new SKColor(0xFF, 0xFF, 0xFF, 0x38) };
+        // One cell, tiled, rather than a draw call per dot. A 5x5 grid — the
+        // default — over the canvas is some thirty thousand one-pixel rectangles
+        // per frame, which made the grid by far the most expensive thing on
+        // screen and made dragging anything with it on visibly slow. The cell
+        // bitmap and its shader are built per frame and thrown away: they cost
+        // a hundred-odd bytes and two objects, against the calls they replace.
+        using SKBitmap cell = new(grid.Width, grid.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
 
-        for (float y = 0; y < bounds.Bottom; y += grid.Height)
-        {
-            for (float x = 0; x < bounds.Right; x += grid.Width)
-            {
-                canvas.DrawRect(x, y, 1, 1, paint);
-            }
-        }
+        cell.Erase(SKColors.Transparent);
+        cell.SetPixel(0, 0, new SKColor(0xFF, 0xFF, 0xFF, 0x38));
+
+        using SKShader dots = SKShader.CreateBitmap(cell, SKShaderTileMode.Repeat, SKShaderTileMode.Repeat);
+        using SKPaint paint = new() { Shader = dots };
+
+        canvas.DrawRect(SKRect.Create(0, 0, bounds.Right, bounds.Bottom), paint);
     }
 
     /// <summary>Renders a page into a new bitmap of the given size.</summary>
@@ -228,32 +275,53 @@ public sealed class GumpRenderer(IGumpArtSource art)
         {
             switch (element)
             {
-                case ImageElement image when _art.GetGump(image.GumpId) is { } art:
-                    image.SetContentSize(art.Width, art.Height);
+                // Gump-backed elements are measured through TryGetGumpSize,
+                // which answers from the index where the container allows it and
+                // never adds an image to the art cache. Decoding them here used
+                // to fill the cache with an unhued copy of art the painter then
+                // asked for again, hued — two decodes and two cache slots for
+                // one element.
+                case ImageElement image when _art.TryGetGumpSize(image.GumpId, out int w, out int h):
+                    image.SetContentSize(w, h);
                     break;
 
-                case ItemElement item when _art.GetItem(item.ItemId) is { } art:
+                case ItemElement item
+                    when _art.GetItem(item.ItemId, item.Hue, partialHue: true) is { } art:
                     item.SetContentSize(art.Width, art.Height);
                     break;
 
                 // A cropped label's rectangle is the user's, not the text's, so
                 // measuring it would silently undo every resize.
+                //
+                // The hue and the font family are passed because the painter
+                // passes them: without them an ASCII label was measured with a
+                // Unicode face, so its box was the wrong size for the glyphs
+                // that would be drawn in it.
                 case LabelElement { Cropped: false } label
-                    when _art.GetText(label.FontIndex, label.Text) is { } art:
+                    when _art.GetText(label.FontIndex, label.Text, label.Hue, label.FontFamily) is { } art:
                     label.SetContentSize(art.Width, art.Height);
                     break;
 
-                case TileAsGumpElement tile when _art.GetItem(tile.ItemId) is { } art:
+                case TileAsGumpElement tile
+                    when _art.GetItem(tile.ItemId, hue: 0, partialHue: true) is { } art:
                     tile.SetContentSize(art.Width, art.Height);
                     break;
 
-                case ButtonElement button when _art.GetGump(button.NormalId) is { } art:
-                    button.SetContentSize(art.Width, art.Height);
+                // The state the painter will draw, not always the normal face.
+                case ButtonElement button
+                    when _art.TryGetGumpSize(
+                        button.State == ButtonState.Pressed ? button.PressedId : button.NormalId,
+                        out int w,
+                        out int h):
+                    button.SetContentSize(w, h);
                     break;
 
                 case CheckboxElement checkbox
-                    when _art.GetGump(checkbox.IsChecked ? checkbox.CheckedId : checkbox.UncheckedId) is { } art:
-                    checkbox.SetContentSize(art.Width, art.Height);
+                    when _art.TryGetGumpSize(
+                        checkbox.IsChecked ? checkbox.CheckedId : checkbox.UncheckedId,
+                        out int w,
+                        out int h):
+                    checkbox.SetContentSize(w, h);
                     break;
 
                 default:
@@ -262,7 +330,7 @@ public sealed class GumpRenderer(IGumpArtSource art)
         }
     }
 
-    private static void DrawSelection(SKCanvas canvas, Element element)
+    private static void DrawSelection(SKCanvas canvas, Element element, RenderOptions options)
     {
         GumpRect bounds = element.GetAbsoluteBounds();
         SKRect rect = SKRect.Create(bounds.X, bounds.Y, Math.Max(1, bounds.Width), Math.Max(1, bounds.Height));
@@ -270,7 +338,7 @@ public sealed class GumpRenderer(IGumpArtSource art)
         using SKPaint outline = new()
         {
             Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1,
+            StrokeWidth = options.OutlineWidth,
             Color = new SKColor(0x33, 0x99, 0xFF),
             IsAntialias = false,
         };
@@ -286,7 +354,7 @@ public sealed class GumpRenderer(IGumpArtSource art)
 
         foreach (DragMode handle in HandleGeometry.ResizeHandles)
         {
-            GumpRect box = HandleGeometry.GetHandleRect(bounds, handle);
+            GumpRect box = HandleGeometry.GetHandleRect(bounds, handle, options.HandleSize);
             SKRect handleRect = SKRect.Create(box.X, box.Y, box.Width, box.Height);
 
             canvas.DrawRect(handleRect, fill);

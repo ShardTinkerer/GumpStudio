@@ -38,6 +38,10 @@ public sealed class UoDataContext : IDisposable
     private readonly IUoFileProvider? _art;
     private readonly VerdataPatchSet _verdata;
 
+    private readonly Lazy<ClilocTable> _clilocs;
+    private readonly Lazy<AsciiFonts> _asciiFonts;
+    private readonly Lazy<UnicodeFonts> _unicodeFonts;
+
     private UoDataContext(
         string clientPath,
         IUoFileProvider? gumps,
@@ -45,9 +49,9 @@ public sealed class UoDataContext : IDisposable
         VerdataPatchSet verdata,
         HueTable hues,
         TileDataTable tileData,
-        ClilocTable clilocs,
-        AsciiFonts asciiFonts,
-        UnicodeFonts unicodeFonts)
+        Lazy<ClilocTable> clilocs,
+        Lazy<AsciiFonts> asciiFonts,
+        Lazy<UnicodeFonts> unicodeFonts)
     {
         ClientPath = clientPath;
         _gumps = gumps;
@@ -55,9 +59,9 @@ public sealed class UoDataContext : IDisposable
         _verdata = verdata;
         Hues = hues;
         TileData = tileData;
-        Clilocs = clilocs;
-        AsciiFonts = asciiFonts;
-        UnicodeFonts = unicodeFonts;
+        _clilocs = clilocs;
+        _asciiFonts = asciiFonts;
+        _unicodeFonts = unicodeFonts;
     }
 
     /// <summary>The installation this context reads from.</summary>
@@ -67,11 +71,29 @@ public sealed class UoDataContext : IDisposable
 
     public TileDataTable TileData { get; }
 
-    public ClilocTable Clilocs { get; }
+    /// <summary>
+    /// Localised client strings, read on first use.
+    /// </summary>
+    /// <remarks>
+    /// Deferred along with the two font tables because none of the three is
+    /// needed to draw a gump's first frame, and together they were the bulk of
+    /// opening a client: the cliloc table alone is around 124,000 strings and is
+    /// parsed twice on a modern client, since a plain parse is tried before
+    /// decompressing.
+    ///
+    /// The paths are still resolved eagerly in <see cref="Open"/>, so which
+    /// files an installation is missing is decided at open time exactly as
+    /// before — only the reading moved.
+    ///
+    /// Thread safety is load-bearing rather than incidental:
+    /// <see cref="Lazy{T}"/> defaults to <c>ExecutionAndPublication</c>, and text
+    /// is rendered from background art decodes as well as from the UI thread.
+    /// </remarks>
+    public ClilocTable Clilocs => _clilocs.Value;
 
-    public AsciiFonts AsciiFonts { get; }
+    public AsciiFonts AsciiFonts => _asciiFonts.Value;
 
-    public UnicodeFonts UnicodeFonts { get; }
+    public UnicodeFonts UnicodeFonts => _unicodeFonts.Value;
 
     /// <summary>True when gump art was found, in either container format.</summary>
     public bool HasGumps => _gumps is not null;
@@ -151,15 +173,19 @@ public sealed class UoDataContext : IDisposable
                 ? TileDataTable.Load(tilePath)
                 : TileDataTable.Empty;
 
-            ClilocTable clilocs = Find(clientPath, "cliloc.enu") is { } clilocPath
-                ? ClilocTable.Load(clilocPath)
-                : ClilocTable.Empty;
+            // Paths resolved now, contents read on first use. Find() only
+            // probes the directory, so a missing file is still reported by
+            // Validate and still yields an empty table here.
+            string? clilocPath = Find(clientPath, "cliloc.enu");
+            string? fontPath = Find(clientPath, "fonts.mul");
 
-            AsciiFonts asciiFonts = Find(clientPath, "fonts.mul") is { } fontPath
-                ? AsciiFonts.Load(fontPath)
-                : AsciiFonts.Empty;
+            Lazy<ClilocTable> clilocs = new(() =>
+                clilocPath is not null ? ClilocTable.Load(clilocPath) : ClilocTable.Empty);
 
-            UnicodeFonts unicodeFonts = UnicodeFonts.Load(clientPath);
+            Lazy<AsciiFonts> asciiFonts = new(() =>
+                fontPath is not null ? AsciiFonts.Load(fontPath) : AsciiFonts.Empty);
+
+            Lazy<UnicodeFonts> unicodeFonts = new(() => UnicodeFonts.Load(clientPath));
 
             return new UoDataContext(
                 clientPath, gumps, art, verdata, hues, tileData, clilocs, asciiFonts, unicodeFonts);
@@ -386,6 +412,12 @@ public sealed class UoDataContext : IDisposable
         _gumps?.Dispose();
         _art?.Dispose();
         _verdata.Dispose();
-        UnicodeFonts.Dispose();
+
+        // Only if something asked for it. Reading the property would open up to
+        // thirteen font files purely in order to release them again.
+        if (_unicodeFonts.IsValueCreated)
+        {
+            _unicodeFonts.Value.Dispose();
+        }
     }
 }

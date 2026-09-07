@@ -45,7 +45,12 @@ public interface IUndoableCommand
 public sealed class UndoHistory
 {
     private readonly List<IUndoableCommand> _commands = [];
+
+    // One stamp per retained command, identifying the state that command
+    // produces. Parallel to _commands, so trimming keeps them aligned.
+    private readonly List<long> _stamps = [];
     private int _cursor;
+    private long _sequence;
     private bool _isApplying;
 
     public UndoHistory(int capacity = 100)
@@ -71,6 +76,19 @@ public sealed class UndoHistory
     /// <summary>Description of the command <see cref="Redo"/> would reapply.</summary>
     public string? RedoDescription => CanRedo ? _commands[_cursor].Description : null;
 
+    /// <summary>
+    /// Identifies the document state this history currently represents. Zero
+    /// means nothing has been applied.
+    /// </summary>
+    /// <remarks>
+    /// Exists so a caller can tell whether the document still matches what was
+    /// last saved. The undo cursor alone cannot answer that: undoing a step and
+    /// then applying a different change discards the redo tail and leaves the
+    /// cursor at the same number over a different state. A stamp per command
+    /// separates those, and survives the trimming <see cref="Capacity"/> forces.
+    /// </remarks>
+    public long StateId => _cursor == 0 ? 0 : _stamps[_cursor - 1];
+
     /// <summary>Raised after any change to the stack or the cursor.</summary>
     public event EventHandler? Changed;
 
@@ -87,29 +105,22 @@ public sealed class UndoHistory
 
         command.Execute();
 
-        // Anything previously undone is unreachable once a new change lands.
-        if (_cursor < _commands.Count)
-        {
-            _commands.RemoveRange(_cursor, _commands.Count - _cursor);
-        }
+        // Dropped before the merge check, which compares against whatever is
+        // now on top.
+        DropUndoneTail();
 
         if (_cursor > 0 && _commands[_cursor - 1].TryMerge(command))
         {
+            // A merge still changes the document, so the state it names has to
+            // be a new one.
+            _stamps[_cursor - 1] = ++_sequence;
+
             OnChanged();
 
             return;
         }
 
-        _commands.Add(command);
-        _cursor++;
-
-        if (_commands.Count > Capacity)
-        {
-            int excess = _commands.Count - Capacity;
-
-            _commands.RemoveRange(0, excess);
-            _cursor -= excess;
-        }
+        Append(command);
 
         OnChanged();
     }
@@ -166,6 +177,7 @@ public sealed class UndoHistory
     public void Clear()
     {
         _commands.Clear();
+        _stamps.Clear();
         _cursor = 0;
 
         OnChanged();
@@ -229,12 +241,21 @@ public sealed class UndoHistory
     /// <summary>Pushes a command whose effect has already been applied.</summary>
     private void PushExecuted(IUndoableCommand command)
     {
-        if (_cursor < _commands.Count)
-        {
-            _commands.RemoveRange(_cursor, _commands.Count - _cursor);
-        }
+        Append(command);
+
+        OnChanged();
+    }
+
+    /// <summary>
+    /// Records a command at the cursor, dropping anything undone and trimming
+    /// to <see cref="Capacity"/>.
+    /// </summary>
+    private void Append(IUndoableCommand command)
+    {
+        DropUndoneTail();
 
         _commands.Add(command);
+        _stamps.Add(++_sequence);
         _cursor++;
 
         if (_commands.Count > Capacity)
@@ -242,10 +263,23 @@ public sealed class UndoHistory
             int excess = _commands.Count - Capacity;
 
             _commands.RemoveRange(0, excess);
+            _stamps.RemoveRange(0, excess);
             _cursor -= excess;
         }
+    }
 
-        OnChanged();
+    /// <summary>
+    /// Discards anything that was undone, which a new change makes unreachable.
+    /// </summary>
+    private void DropUndoneTail()
+    {
+        if (_cursor >= _commands.Count)
+        {
+            return;
+        }
+
+        _commands.RemoveRange(_cursor, _commands.Count - _cursor);
+        _stamps.RemoveRange(_cursor, _stamps.Count - _cursor);
     }
 }
 

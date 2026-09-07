@@ -97,12 +97,59 @@ public static class UopHash
     /// <c>build/gumpartlegacymul/{0:D8}.tga</c>.
     /// </param>
     /// <param name="index">The entry index to substitute.</param>
+    /// <remarks>
+    /// Formatted into a stack buffer rather than through
+    /// <see cref="string.Format(IFormatProvider, string, object?)"/> and
+    /// <c>ToLowerInvariant</c>. Opening a client hashes every possible index of
+    /// every container — over a hundred and forty thousand of them — and the two
+    /// strings per call were the largest single source of allocation in a client
+    /// open. <see cref="Compute(ReadOnlySpan{char})"/> already took a span.
+    ///
+    /// The pattern is lowercased as it is copied, so a caller need not hold a
+    /// pre-lowered copy: these paths are ASCII, and only the placeholder's
+    /// digits are added.
+    /// </remarks>
     public static ulong ComputeForIndex(string pattern, int index)
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        return Compute(
-            string.Format(CultureInfo.InvariantCulture, pattern, index).ToLowerInvariant());
+        const string Placeholder = "{0:D8}";
+
+        int at = pattern.IndexOf(Placeholder, StringComparison.Ordinal);
+
+        if (at < 0)
+        {
+            // Not a pattern this fast path understands; fall back rather than
+            // guess at where the index belongs.
+            return Compute(
+                string.Format(CultureInfo.InvariantCulture, pattern, index).ToLowerInvariant());
+        }
+
+        // The placeholder yields exactly eight digits.
+        const int Digits = 8;
+
+        int length = pattern.Length - Placeholder.Length + Digits;
+
+        Span<char> buffer = length <= 256 ? stackalloc char[256] : new char[length];
+        Span<char> path = buffer[..length];
+
+        ReadOnlySpan<char> prefix = pattern.AsSpan(0, at);
+        ReadOnlySpan<char> suffix = pattern.AsSpan(at + Placeholder.Length);
+
+        prefix.ToLowerInvariant(path[..prefix.Length]);
+
+        if (!index.TryFormat(
+                path.Slice(prefix.Length, Digits), out _, "D8", CultureInfo.InvariantCulture))
+        {
+            // An index needing more than eight digits cannot appear in a
+            // container this format can address.
+            return Compute(
+                string.Format(CultureInfo.InvariantCulture, pattern, index).ToLowerInvariant());
+        }
+
+        suffix.ToLowerInvariant(path[(prefix.Length + Digits)..]);
+
+        return Compute(path);
     }
 
     private static uint Rotate(uint value, int bits) => (value >> (32 - bits)) | (value << bits);

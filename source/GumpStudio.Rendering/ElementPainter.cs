@@ -17,8 +17,59 @@ namespace GumpStudio.Rendering;
 /// would do, and what the original's per-exporter switches did.
 /// </remarks>
 internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, RenderOptions options)
-    : IElementVisitor
+    : IElementVisitor, IDisposable
 {
+    // Held for the life of one page render rather than allocated per element
+    // per frame. An SKPaint wraps a native object, and a page of fifty elements
+    // was creating and destroying one for each of them on every repaint.
+    private SKPaint? _alphaWash;
+    private SKPaint? _textEntryWash;
+    private SKPaint? _missing;
+    private SKPaint? _outline;
+
+    // Reused across every nine-sliced element on the page.
+    private readonly SKImage?[] _pieces = new SKImage?[NineSlice.PieceCount];
+
+    private SKPaint AlphaWash => _alphaWash ??= new SKPaint
+    {
+        Style = SKPaintStyle.Fill,
+        Color = new SKColor(0, 0, 0, 0x80),
+    };
+
+    private SKPaint TextEntryWash => _textEntryWash ??= new SKPaint
+    {
+        Style = SKPaintStyle.Fill,
+        Color = new SKColor(0xFF, 0xFF, 0x00, 50),
+    };
+
+    private SKPaint Missing => _missing ??= new SKPaint
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeWidth = 1,
+        Color = new SKColor(0xC0, 0x40, 0x40, 0xC0),
+    };
+
+    /// <summary>
+    /// The outline stroke, whose colour the caller sets.
+    /// </summary>
+    /// <remarks>
+    /// Shared and mutated, which is safe because a painter belongs to a single
+    /// page render on one thread and every use draws before the next changes it.
+    /// </remarks>
+    private SKPaint Outline => _outline ??= new SKPaint
+    {
+        Style = SKPaintStyle.Stroke,
+        StrokeWidth = 1,
+    };
+
+    public void Dispose()
+    {
+        _alphaWash?.Dispose();
+        _textEntryWash?.Dispose();
+        _missing?.Dispose();
+        _outline?.Dispose();
+    }
+
     /// <summary>Draws an element and, for a group, everything inside it.</summary>
     public void Paint(Element element)
     {
@@ -57,25 +108,17 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
     {
         // An alpha region darkens what is behind it; the client renders a
         // checkerboard stipple, but a flat wash reads better while editing.
-        using SKPaint paint = new()
-        {
-            Style = SKPaintStyle.Fill,
-            Color = new SKColor(0, 0, 0, 0x80),
-        };
-
-        canvas.DrawRect(ToRect(element.Bounds), paint);
+        canvas.DrawRect(ToRect(element.Bounds), AlphaWash);
     }
 
     public void Visit(BackgroundElement element)
     {
-        SKImage?[] pieces = new SKImage?[NineSlice.PieceCount];
-
-        for (int i = 0; i < pieces.Length; i++)
+        for (int i = 0; i < _pieces.Length; i++)
         {
-            pieces[i] = art.GetGump(element.GumpId + i);
+            _pieces[i] = art.GetGump(element.GumpId + i);
         }
 
-        NineSlice.Draw(canvas, pieces, ToRect(element.Bounds));
+        NineSlice.Draw(canvas, _pieces, ToRect(element.Bounds));
     }
 
     public void Visit(TiledElement element)
@@ -188,9 +231,8 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
         // the field's extent some other way or an empty one is invisible. A
         // translucent yellow wash over the bounds is what the original used, and
         // it reads as "the player can type here" at a glance.
-        using (SKPaint wash = new() { Style = SKPaintStyle.Fill, Color = new SKColor(0xFF, 0xFF, 0x00, 50) })
         {
-            canvas.DrawRect(ToRect(element.Bounds), wash);
+            canvas.DrawRect(ToRect(element.Bounds), TextEntryWash);
         }
 
         if (art.GetText(element.FontIndex, element.InitialText, element.Hue, element.FontFamily)
@@ -211,14 +253,12 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
         if (element.ShowBackground)
         {
             // The client frames an HTML area with gump 3000 and its neighbours.
-            SKImage?[] pieces = new SKImage?[NineSlice.PieceCount];
-
-            for (int i = 0; i < pieces.Length; i++)
+            for (int i = 0; i < _pieces.Length; i++)
             {
-                pieces[i] = art.GetGump(3000 + i);
+                _pieces[i] = art.GetGump(3000 + i);
             }
 
-            NineSlice.Draw(canvas, pieces, ToRect(element.Bounds));
+            NineSlice.Draw(canvas, _pieces, ToRect(element.Bounds));
         }
         else
         {
@@ -363,13 +403,7 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
             return;
         }
 
-        using SKPaint paint = new()
-        {
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1,
-            Color = new SKColor(0xC0, 0x40, 0x40, 0xC0),
-        };
-
+        SKPaint paint = Missing;
         SKRect rect = ToRect(bounds);
 
         canvas.DrawRect(rect, paint);
@@ -384,12 +418,8 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
             return;
         }
 
-        using SKPaint paint = new()
-        {
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = 1,
-            Color = color,
-        };
+        SKPaint paint = Outline;
+        paint.Color = color;
 
         canvas.DrawRect(ToRect(bounds), paint);
     }

@@ -40,22 +40,40 @@ public sealed class UopFileProvider : IUoFileProvider
     private readonly bool _hasDimensionPrefix;
 
     /// <summary>
-    /// A one-entry memo of the most recently decoded payload.
+    /// How much decoded payload to keep, in bytes.
+    /// </summary>
+    /// <remarks>
+    /// Decoding all 5579 gumps of a retail package eagerly took minutes and
+    /// hundreds of megabytes, so this is deliberately a modest window over the
+    /// entries in play rather than the whole container.
+    /// </remarks>
+    private const long PayloadBudget = 32L * 1024 * 1024;
+
+    /// <summary>
+    /// Recently decoded payloads, most recently used last.
     /// </summary>
     /// <remarks>
     /// Decoding is expensive — inflate plus, for compression flag 3, a
     /// Burrows-Wheeler pass — and the normal access pattern is
     /// <see cref="GetEntry"/> immediately followed by <see cref="Read"/> for the
-    /// same index. Memoising just the last payload collapses that to one decode
-    /// without the unbounded memory a full cache would cost: decoding all 5579
-    /// gumps in a retail package eagerly took minutes and hundreds of megabytes.
-    /// Image-level caching belongs in the rendering layer, not here.
+    /// same index, so a memo of the single last payload already collapsed that
+    /// pair to one decode.
+    ///
+    /// It only worked while requests arrived in that order and one at a time.
+    /// An art browser scrolling through thumbnails interleaves indices, and on
+    /// a container that carries its dimensions inside the payload every
+    /// <c>GetEntry</c> is itself a full decode — so a one-entry memo turned
+    /// each revisited entry back into a fresh inflate. A small window keeps the
+    /// entries actually in play. Image-level caching still belongs in the
+    /// rendering layer, not here.
     /// </remarks>
-    private int _memoIndex = -1;
-    private ReadOnlyMemory<byte> _memo;
+    private readonly Dictionary<int, ReadOnlyMemory<byte>> _payloads = [];
+    private readonly LinkedList<int> _payloadOrder = new();
+    private readonly Dictionary<int, LinkedListNode<int>> _payloadNodes = [];
+    private long _payloadBytes;
 
     /// <summary>
-    /// Guards the lazily-populated dimension cache and the payload memo.
+    /// Guards the lazily-populated dimension cache and the payload window.
     /// </summary>
     /// <remarks>
     /// Both are written on first access, so concurrent readers — an art browser
@@ -313,9 +331,11 @@ public sealed class UopFileProvider : IUoFileProvider
             return ReadOnlyMemory<byte>.Empty;
         }
 
-        if (_memoIndex == index)
+        if (_payloads.TryGetValue(index, out ReadOnlyMemory<byte> cached))
         {
-            return _memo;
+            TouchPayload(index);
+
+            return cached;
         }
 
         byte[] raw = new byte[entry.CompressedLength];
@@ -334,10 +354,41 @@ public sealed class UopFileProvider : IUoFileProvider
             _ => ReadOnlyMemory<byte>.Empty,
         };
 
-        _memoIndex = index;
-        _memo = result;
+        Remember(index, result);
 
         return result;
+    }
+
+    /// <summary>Adds a decoded payload to the window, evicting the oldest.</summary>
+    private void Remember(int index, ReadOnlyMemory<byte> payload)
+    {
+        _payloads[index] = payload;
+        _payloadNodes[index] = _payloadOrder.AddLast(index);
+        _payloadBytes += payload.Length;
+
+        // One entry always stays, so a payload larger than the whole budget is
+        // still usable rather than being decoded and dropped every time.
+        while (_payloadBytes > PayloadBudget && _payloads.Count > 1 && _payloadOrder.First is { } oldest)
+        {
+            int evicted = oldest.Value;
+
+            _payloadOrder.RemoveFirst();
+            _payloadNodes.Remove(evicted);
+
+            if (_payloads.Remove(evicted, out ReadOnlyMemory<byte> dropped))
+            {
+                _payloadBytes -= dropped.Length;
+            }
+        }
+    }
+
+    private void TouchPayload(int index)
+    {
+        if (_payloadNodes.TryGetValue(index, out LinkedListNode<int>? node))
+        {
+            _payloadOrder.Remove(node);
+            _payloadOrder.AddLast(node);
+        }
     }
 
     private static ReadOnlyMemory<byte> Inflate(byte[] compressed, int decompressedLength)

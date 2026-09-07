@@ -54,9 +54,29 @@ public static class HandleGeometry
     ];
 
     /// <summary>The rectangle a given handle occupies for an element of these bounds.</summary>
-    public static GumpRect GetHandleRect(GumpRect bounds, DragMode handle)
+    public static GumpRect GetHandleRect(GumpRect bounds, DragMode handle) =>
+        GetHandleRect(bounds, handle, HandleSize);
+
+    /// <summary>
+    /// The rectangle of one resize handle, at a given size.
+    /// </summary>
+    /// <param name="bounds">The element's bounds.</param>
+    /// <param name="handle">Which handle.</param>
+    /// <param name="handleSize">
+    /// The handle's side, in the same units as <paramref name="bounds"/>.
+    /// </param>
+    /// <remarks>
+    /// The size is a parameter because the canvas can be zoomed. A handle is
+    /// meant to be the same size under the pointer whatever the zoom, so the
+    /// caller grows it in gump units as the view shrinks — and both the drawing
+    /// and the hit testing have to agree on that, or the handle would be
+    /// somewhere other than where it looks.
+    /// </remarks>
+    public static GumpRect GetHandleRect(GumpRect bounds, DragMode handle, int handleSize)
     {
-        int half = HandleSize / 2;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(handleSize);
+
+        int half = handleSize / 2;
 
         (int x, int y) = handle switch
         {
@@ -71,7 +91,7 @@ public static class HandleGeometry
             _ => throw new ArgumentOutOfRangeException(nameof(handle), handle, "Not a resize handle."),
         };
 
-        return new GumpRect(x - half, y - half, HandleSize, HandleSize);
+        return new GumpRect(x - half, y - half, handleSize, handleSize);
     }
 
     /// <summary>
@@ -80,7 +100,19 @@ public static class HandleGeometry
     /// <param name="bounds">The element's bounds, in the same space as the point.</param>
     /// <param name="point">Where the pointer is.</param>
     /// <param name="resizable">False for elements that can only be moved.</param>
-    public static DragMode HitTest(GumpRect bounds, GumpPoint point, bool resizable)
+    public static DragMode HitTest(GumpRect bounds, GumpPoint point, bool resizable) =>
+        HitTest(bounds, point, resizable, HandleSize);
+
+    /// <summary>
+    /// Decides what a press at <paramref name="point"/> would start, with
+    /// handles of a given size.
+    /// </summary>
+    /// <param name="bounds">The element's bounds, in the same space as the point.</param>
+    /// <param name="point">Where the pointer is.</param>
+    /// <param name="resizable">False for elements that can only be moved.</param>
+    /// <param name="handleSize">The handle's side, in the same units as the bounds.</param>
+    public static DragMode HitTest(
+        GumpRect bounds, GumpPoint point, bool resizable, int handleSize)
     {
         if (resizable)
         {
@@ -88,14 +120,18 @@ public static class HandleGeometry
             // handle overlaps its two neighbours' edges.
             foreach (DragMode handle in ResizeHandles)
             {
-                if (GetHandleRect(bounds, handle).Contains(point))
+                if (GetHandleRect(bounds, handle, handleSize).Contains(point))
                 {
                     return handle;
                 }
             }
         }
 
-        return bounds.Inflate(SelectionPadding, SelectionPadding).Contains(point)
+        // The grab margin around the body grows with the handles, so a zoomed-out
+        // element stays as easy to pick up as a zoomed-in one.
+        int padding = Math.Max(SelectionPadding, handleSize * SelectionPadding / HandleSize);
+
+        return bounds.Inflate(padding, padding).Contains(point)
             ? DragMode.Move
             : DragMode.None;
     }

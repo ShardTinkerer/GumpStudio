@@ -22,7 +22,24 @@ internal sealed class TestArtSource(FakeArtSource art) : IGumpArtSource
     /// <summary>The font each of those was asked for, in the same order.</summary>
     public List<(GumpFontFamily Family, int Index)> FontRequests { get; } = [];
 
-    public SKImage? GetGump(int gumpId, int hue = 0, bool partialHue = false) => art.Lookup("gump", gumpId);
+    /// <summary>
+    /// Every text lookup in full, so the measure pass and the paint pass can be
+    /// compared key for key.
+    /// </summary>
+    public List<(int Index, string Text, int Hue, GumpFontFamily Family)> TextKeys { get; } = [];
+
+    /// <summary>Every gump lookup, as (id, hue), in order.</summary>
+    public List<(int Id, int Hue)> GumpRequests { get; } = [];
+
+    /// <summary>Every dimension-only lookup, which decodes no pixels.</summary>
+    public List<int> SizeRequests { get; } = [];
+
+    public SKImage? GetGump(int gumpId, int hue = 0, bool partialHue = false)
+    {
+        GumpRequests.Add((gumpId, hue));
+
+        return art.Lookup("gump", gumpId);
+    }
 
     public SKImage? GetItem(int itemId, int hue = 0, bool partialHue = false) => art.Lookup("item", itemId);
 
@@ -31,6 +48,7 @@ internal sealed class TestArtSource(FakeArtSource art) : IGumpArtSource
     {
         TextRequests.Add(text);
         FontRequests.Add((family, fontIndex));
+        TextKeys.Add((fontIndex, text, hue, family));
 
         return art.MakeText(text);
     }
@@ -40,6 +58,8 @@ internal sealed class TestArtSource(FakeArtSource art) : IGumpArtSource
 
     public bool TryGetGumpSize(int gumpId, out int width, out int height)
     {
+        SizeRequests.Add(gumpId);
+
         SKImage? image = art.Lookup("gump", gumpId);
 
         width = image?.Width ?? 0;
