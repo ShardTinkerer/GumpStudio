@@ -5,6 +5,12 @@ dotnet build GumpStudio.slnx
 pwsh eng/run-tests.ps1
 ```
 
+The same two lines are what CI runs, in the `test` job of both
+`.github/workflows/build-pr.yml` and `.github/workflows/build-and-release.yml`,
+on Windows and Ubuntu. `run-tests.ps1` looks for the executables under
+`bin/<configuration>/net10.0`, so a build that redirects its output leaves the
+script with nothing to launch.
+
 Tests run on **Microsoft.Testing Platform** (xunit.v3). .NET 10 removed the
 VSTest bridge, so the opt-in lives in `global.json`:
 

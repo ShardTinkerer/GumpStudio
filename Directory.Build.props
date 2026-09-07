@@ -23,11 +23,37 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
+  <!--
+    What a NativeAOT publish has to tolerate. Both apps publish AOT and both hit
+    the same two packages, so this lives here rather than being repeated.
+
+    IL3051 fires inside System.Formats.Nrbf, which Microsoft ships:
+    SZArrayRecord<T>.Deserialize overrides a RequiresDynamicCode member without
+    carrying the attribute. It is an annotation-consistency check, raised
+    whether or not the method is reachable, and the legacy importer never calls
+    it — it walks the records by hand with GetArray and GetRawValue and
+    deliberately never activates a type.
+
+    IL2104 and IL3053 are the per-assembly roll-ups, raised for Nrbf and for
+    Dock. Dock's Fluent theme binds a dockable's title and close button by name
+    rather than with compiled bindings, and its container generator reflects
+    over whatever an ItemsSource hands it. All of it is library code that this
+    repository cannot annotate; the published binaries are run by hand after a
+    dependency bump.
+
+    The warnings that matter still fail the build. A roll-up only covers code
+    shipped in a package — this repository's own IL2026 and IL3050 are reported
+    individually, and TreatWarningsAsErrors still stops the publish dead.
+  -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <NoWarn>$(NoWarn);IL3051;IL2104;IL3053</NoWarn>
+  </PropertyGroup>
+
   <PropertyGroup>
     <Product>GumpStudio</Product>
     <Company>GumpStudio Resurrection</Company>
     <Copyright>Originally by Bradley Uffner, 2004.</Copyright>
-    <Version>2.0.0-alpha</Version>
+    <Version>2.0.0</Version>
   </PropertyGroup>
 
   <!--

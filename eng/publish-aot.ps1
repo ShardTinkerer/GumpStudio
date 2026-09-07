@@ -1,23 +1,32 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Publishes GumpStudio as a self-contained NativeAOT executable.
+    Publishes GumpStudio as self-contained NativeAOT executables.
 
 .DESCRIPTION
-    Produces a single native binary with no .NET runtime to install and no
-    managed assemblies beside it, next to the native SkiaSharp, HarfBuzz and
-    ANGLE libraries Avalonia needs. PublishAot implies a self-contained
-    publish, so --self-contained is not passed and would add nothing.
+    Produces native binaries with no .NET runtime to install and no managed
+    assemblies beside them, next to the native SkiaSharp, HarfBuzz and ANGLE
+    libraries Avalonia needs. PublishAot implies a self-contained publish, so
+    --self-contained is not passed and would add nothing.
 
-    This runs the same code as an ordinary build. It did not always: the
-    exporters used to arrive as plugin assemblies, which a NativeAOT image
-    cannot load at all, so that build needed a second registration path behind
-    an #if. The converters are referenced normally now and there is no
-    difference left to accommodate.
+    Both the editor and the headless CLI are published into the same folder:
+    that folder is what a release archive is made from, and the README documents
+    the CLI, so shipping one without the other makes those docs a lie. They
+    share the native payload, so the second publish rewrites identical files.
+
+    NativeAOT cannot cross-compile. Runtime has to match the machine this runs
+    on, which is why the release workflow has one runner per RID.
+
+    Symbols and XML documentation are turned off rather than deleted afterwards.
+    Left on, the doc files for five projects outweigh the binaries they describe.
 
 .PARAMETER Runtime
     Runtime identifier, for example win-x64, linux-x64 or osx-arm64. Defaults to
     the current machine's.
+
+.PARAMETER Version
+    Version to stamp into the binaries, normally the release tag. Defaults to
+    the repository's own version from Directory.Build.props.
 
 .PARAMETER Output
     Where to write the published files.
@@ -25,6 +34,7 @@
 [CmdletBinding()]
 param(
     [string] $Runtime,
+    [string] $Version,
     [string] $Output
 )
 
@@ -57,24 +67,62 @@ if ($IsWindows) {
               'toolchain: install the "Desktop development with C++" workload.'
     }
 }
-
-Write-Host "Publishing NativeAOT for $Runtime to $Output" -ForegroundColor Cyan
-
-dotnet publish (Join-Path $repoRoot 'source/GumpStudio.App') `
-    --configuration Release `
-    --runtime $Runtime `
-    -p:PublishAot=true `
-    --output $Output `
-    --nologo
-
-if ($LASTEXITCODE -ne 0) {
-    exit $LASTEXITCODE
+else {
+    # The same trap on the other side: ILC links through clang, and without it
+    # the failure arrives as a bare non-zero exit from a tool nobody named.
+    if (-not (Get-Command clang -ErrorAction SilentlyContinue)) {
+        throw 'clang was not found. NativeAOT needs a native toolchain: ' +
+              'install clang and the zlib development headers (on Debian and ' +
+              'Ubuntu, clang and zlib1g-dev).'
+    }
 }
 
-$binary = Get-ChildItem $Output -File |
-    Where-Object { $_.Name -like 'GumpStudio.App*' -and $_.Extension -in '', '.exe' } |
-    Select-Object -First 1
+# Anything left from an earlier run would end up in the archive. A stale binary
+# from a RID that is no longer published is the one that would go unnoticed.
+if (Test-Path $Output) {
+    Remove-Item $Output -Recurse -Force
+}
 
-if ($binary) {
+$common = @(
+    '--configuration', 'Release'
+    '--runtime', $Runtime
+    '--output', $Output
+    '--nologo'
+    '-p:PublishAot=true'
+    '-p:DebugType=none'
+    '-p:GenerateDocumentationFile=false'
+)
+
+if ($Version) {
+    $common += "-p:Version=$Version"
+}
+
+$projects = 'source/GumpStudio.App', 'source/GumpStudio.Cli'
+
+$label = if ($Version) { "$Version " } else { '' }
+
+Write-Host "Publishing NativeAOT $label($Runtime) to $Output" -ForegroundColor Cyan
+
+foreach ($project in $projects) {
+    dotnet publish (Join-Path $repoRoot $project) @common
+
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
+# ILC emits a native symbol file whatever DebugType says.
+Get-ChildItem $Output -Filter '*.pdb' -File -Recurse | Remove-Item -Force
+
+# Wrapped, because one match is a bare FileInfo and no match is $null, and
+# Set-StrictMode turns reading .Count off the latter into an error.
+$binaries = @(Get-ChildItem $Output -File |
+    Where-Object { $_.Name -in 'GumpStudio.App', 'GumpStudio.App.exe', 'gumpstudio', 'gumpstudio.exe' })
+
+foreach ($binary in $binaries) {
     Write-Host ("Native binary: {0} ({1:N1} MB)" -f $binary.Name, ($binary.Length / 1MB)) -ForegroundColor Green
+}
+
+if ($binaries.Count -ne $projects.Count) {
+    throw "Expected $($projects.Count) native binaries in $Output, found $($binaries.Count)."
 }

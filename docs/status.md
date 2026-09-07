@@ -1046,6 +1046,55 @@ for the AOT publish only. The published binary was run afterwards: the layout,
 the tab titles and the floating windows all behave as they do in a normal build,
 which is what those bindings drive.
 
+### Two pipelines, and something to download
+
+CI was one workflow that built and tested on Windows and Ubuntu, triggered by
+pushes and pull requests **on `main`**. Since the whole rewrite lives on a
+branch, it had never run for any of it. Nothing published: `eng/publish-aot.ps1`
+was a hand-run developer script, host RID only, editor only, no version, no
+archive.
+
+There are two workflows now, following the shape UOFiddler uses.
+
+`build-pr.yml` runs on a pull request into **any** branch, so work that never
+touches `main` is still gated. It tests on both operating systems as before, and
+adds a win-x64 AOT publish that keeps nothing. That job exists because of the
+Dock upgrade: a dependency that starts emitting trim warnings turns
+`TreatWarningsAsErrors` into a failed publish, and that should surface in review
+rather than when someone is trying to cut a release.
+
+`build-and-release.yml` runs on pushes to `main` and on version tags. It tests,
+then publishes NativeAOT for win-x64 and linux-x64 — one runner each, because
+NativeAOT compiles for the machine it runs on and cannot cross-compile — and
+archives each as `GumpStudio-<version>-<rid>`. On a tag, and only on a tag, the
+archives are attached to a GitHub release. The tag is the version: it is stamped
+into the binaries with `-p:Version`, names the archives, and a `-` in it marks
+the release as a prerelease. Untagged builds fall back to the `Version` in
+`Directory.Build.props`.
+
+Windows gets a zip and Linux a tarball. A zip has nowhere to record the
+executable bit, so a Linux download would arrive unrunnable — and it is the one
+thing CI cannot catch for itself, since the job that built the archive never
+unpacks it.
+
+Publishing both binaries meant the CLI had to survive NativeAOT, which nothing
+had ever asked of it. It did not: `System.Formats.Nrbf` produces the same
+analysis warnings there as in the editor, and the editor was suppressing them in
+its own csproj. The suppression moved to `Directory.Build.props`, behind
+`PublishAot`, where it now covers both apps and carries one explanation instead
+of two. What it hides is still narrow — an assembly roll-up only covers code
+shipped in a package, so this repository's own IL2026 and IL3050 keep failing
+the build.
+
+The published layout also stopped shipping its own documentation: with
+`GenerateDocumentationFile` on, the XML docs for five projects outweighed the
+binaries they described. Symbols and doc files are off for a release publish,
+and the output folder is cleared first so a stale binary from a RID no longer
+built cannot ride along in the archive.
+
+Still missing: there is no `LICENSE` file in this repository, and these
+workflows put binaries in front of the public.
+
 ## Defect inventory
 
 Verified findings from the audit of `src/`, kept as a regression checklist.

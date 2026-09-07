@@ -1,0 +1,193 @@
+name: Build & Release
+
+# Pushes to main build and archive but publish nothing. A version tag does the
+# same work and then attaches the archives to a GitHub release, so the tag is
+# the only thing that decides what the world sees. Two globs because the second
+# is what matches a prerelease such as 2.0.0-alpha.1.
+on:
+  push:
+    branches: [main]
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Not cancel-in-progress: a superseded release build is still a build somebody
+# may be waiting on the artifacts of.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CI: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore GumpStudio.slnx
+
+      - name: Build
+        run: dotnet build GumpStudio.slnx --configuration Release --no-restore
+
+      # See build-pr.yml for why the tests are launched directly and why the
+      # client-data variables are left unset.
+      - name: Test
+        shell: pwsh
+        run: >
+          ./eng/run-tests.ps1
+          -Configuration Release
+          -ResultsDirectory ./artifacts/test-results
+          -Coverage
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: ./artifacts/test-results
+
+  publish:
+    name: Publish (${{ matrix.rid }})
+    needs: test
+
+    # One runner per RID: NativeAOT compiles to the machine it runs on and
+    # cannot cross-compile.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      # ILC links through clang and needs zlib's headers. Installing them
+      # explicitly rather than trusting whatever the runner image ships.
+      - name: Install the native toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
+      # A tag names itself. Anything else is a main build, which is stamped with
+      # the repository's own version rather than a branch name that Version
+      # cannot hold.
+      - name: Work out the version
+        shell: pwsh
+        run: |
+          $tag = if ('${{ github.ref_type }}' -eq 'tag') { '${{ github.ref_name }}' } else { '' }
+          $name = if ($tag) { $tag } else { 'main' }
+          Add-Content $env:GITHUB_ENV "ReleaseVersion=$tag"
+          Add-Content $env:GITHUB_ENV "ReleaseName=$name"
+          Add-Content $env:GITHUB_ENV "ArchiveName=GumpStudio-$name-${{ matrix.rid }}"
+
+      - name: Publish
+        shell: pwsh
+        run: >
+          ./eng/publish-aot.ps1
+          -Runtime ${{ matrix.rid }}
+          -Version "${env:ReleaseVersion}"
+          -Output "artifacts/stage/${env:ArchiveName}"
+
+      - name: Add the documentation
+        shell: pwsh
+        run: |
+          Copy-Item README.md "artifacts/stage/${env:ArchiveName}"
+          if (Test-Path LICENSE) { Copy-Item LICENSE "artifacts/stage/${env:ArchiveName}" }
+
+      # Windows gets a zip and Linux a tarball, because a zip has nowhere to
+      # record the executable bit and the native binary arrives unrunnable.
+      # Both keep the named folder at the top so unpacking cannot scatter files
+      # across whatever directory the download landed in.
+      - name: Archive (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "artifacts/stage/${env:ArchiveName}" -DestinationPath "artifacts/${env:ArchiveName}.zip"
+
+      - name: Archive (tarball)
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: tar -czf "artifacts/${env:ArchiveName}.tar.gz" -C artifacts/stage "${env:ArchiveName}"
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ArchiveName }}
+          path: artifacts/${{ env.ArchiveName }}.*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Release
+    needs: publish
+    if: github.ref_type == 'tag'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: GumpStudio-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: GumpStudio ${{ github.ref_name }}
+          files: dist/*
+          generate_release_notes: true
+          # Publishing an empty release is worse than failing to publish one.
+          fail_on_unmatched_files: true
+          draft: false
+          # 2.0.0-alpha.1 is a prerelease; 2.0.0 is not.
+          prerelease: ${{ contains(github.ref_name, '-') }}

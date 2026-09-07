@@ -80,19 +80,35 @@ The ids earlier releases used still work: `pol-layout`, `runuo-numeric`,
 `sphere-056` and `sphere-099` select the same converter and dialect as before.
 Run `gumpstudio` with no arguments for the list.
 
+## Releases
+
+Published on the [releases page](https://github.com/AsYlum-/GumpStudio/releases)
+as one archive per platform — `GumpStudio-<version>-win-x64.zip` and
+`GumpStudio-<version>-linux-x64.tar.gz`. Each holds the editor and the
+`gumpstudio` CLI as NativeAOT binaries: unpack and run, with no .NET runtime to
+install. Linux ships a tarball rather than a zip because a zip cannot carry the
+executable bit.
+
+A release is cut by pushing a version tag — `2.0.0-alpha.1`, `2.1.0`, no `v`
+prefix. The tag is the version: it is stamped into the binaries and names the
+archives. A tag with a `-` in it is published as a prerelease. Pushes to `main`
+run the same build and keep the archives as CI artifacts without publishing
+anything.
+
 ## Building a release
 
 ```sh
 # Self-contained
 dotnet publish source/GumpStudio.App -c Release -r win-x64 --self-contained
 
-# Single native binary, no runtime to install
+# Both binaries as single native files, no runtime to install
 pwsh eng/publish-aot.ps1 -Runtime win-x64
 ```
 
-Both builds contain the same four converters, compiled in. On Windows the
-NativeAOT build needs the MSVC toolchain — the "Desktop development with C++"
-workload.
+Both builds contain the same four converters, compiled in. NativeAOT compiles
+for the machine it runs on and cannot cross-compile, so each platform is built
+on its own. It needs a native toolchain: on Windows the MSVC "Desktop
+development with C++" workload, elsewhere clang and zlib's headers.
 
 ## Repository layout
 
