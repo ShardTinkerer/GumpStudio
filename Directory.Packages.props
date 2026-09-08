@@ -19,6 +19,18 @@
 
   <ItemGroup Label="Rendering">
     <PackageVersion Include="SkiaSharp" Version="4.151.2" />
+
+    <!--
+      SkiaSharp depends on its Win32 and macOS native assets but not on the Linux
+      ones, so Linux is the one platform where the native library has to be asked
+      for by name. Two things go wrong without this entry, and they look nothing
+      alike: projects that only reference SkiaSharp get no libSkiaSharp.so at all,
+      while GumpStudio.App gets Avalonia.Skia's transitive 3.119.x copy, and the
+      managed 4.151.2 refuses it as "native library (119.0) is incompatible".
+      Pinning the version here fixes the second through transitive pinning; the
+      PackageReference beside each SkiaSharp one fixes the first.
+    -->
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="4.151.2" />
   </ItemGroup>
 
   <ItemGroup Label="Runtime">

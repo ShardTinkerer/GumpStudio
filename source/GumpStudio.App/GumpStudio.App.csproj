@@ -35,6 +35,7 @@
     <PackageReference Include="Dock.Model.Avalonia" />
     <PackageReference Include="Dock.Avalonia.Themes.Simple" />
     <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
   </ItemGroup>
 
   <!--
