@@ -84,6 +84,13 @@ pairs, `verdata.mul` patch sets and `.uop` packages, covering container parsing,
 missing and truncated entries, verdata overrides, block-chain walking,
 compression and the gump dimension prefix.
 
+`ClilocFixture` writes the cliloc record stream, so the string table's own edge
+cases are covered without a client too: the UTF-8 byte-length rule, entry
+ordering, the 16-byte tolerated tail and the file truncated past it, and a
+garbage buffer falling through to the wrapped-file path. Language discovery and
+switching run against a temporary folder holding nothing but `cliloc.enu` and
+`cliloc.deu`, since opening a client needs only the directory to exist.
+
 The UOP path hash is covered by known-answer tests using values read out of a
 retail package, so the algorithm stays pinned with no client present. This
 matters because a synthetic package built by our own writer would share any
@@ -107,6 +114,15 @@ of the wrong thing:
   simply shows an app that ignored every click. Attach to the foreground thread's
   input queue first (`AttachThreadInput`), and **assert that the window really is
   in front before sending anything** rather than trusting the call.
+
+- **A borderless, topmost window cannot be captured this way at all.**
+  `PrintWindow` returns solid black for the splash screen even with
+  `PW_RENDERFULLCONTENT`, and with a loud test background to prove it is not the
+  window painting nothing. Reading its rectangle back off the screen instead
+  races its two-second life and loses to z-order. Verify that one by eye; what
+  *can* be automated is the startup **sequence**, by polling the process's
+  visible windows and their sizes, which shows only the splash until it closes
+  and only the editor afterwards.
 
 Menu popups are separate top-level windows, so enumerate the process's visible
 windows rather than expecting them inside the main window's capture.

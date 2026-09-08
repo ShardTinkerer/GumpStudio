@@ -12,7 +12,8 @@ Six projects, all `net10.0`. Two rules shape the layout:
 
 ```
 GumpStudio.Uo            UO client data: .mul + .uop, art, gumps, hues,
-                         tiledata, cliloc, ASCII + Unicode fonts.
+                         tiledata, cliloc + its ~1_X~ substitution rules,
+                         ASCII + Unicode fonts.
                          Returns plain pixel buffers — no bitmaps.
         │
 GumpStudio.Core          Element model, document model, commands + undo,

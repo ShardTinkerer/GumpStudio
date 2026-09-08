@@ -8,7 +8,22 @@
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Views are XAML; the generated partials do not carry doc comments. -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!--
+      The 1.8 icon, so the executable and the taskbar look like the application
+      they continue rather than like a generic .NET window.
+    -->
+    <ApplicationIcon>Assets\gumpstudio.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <!--
+      Artwork recovered from the 1.8 build. The splash graphic is the JPEG that
+      was embedded in both SplashForm and AboutBoxForm, byte for byte; the icon
+      is the one on GumpStudio.exe, its 32x32 original kept verbatim and larger
+      sizes added by exact nearest-neighbour multiples. See docs/assets.md.
+  -->
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />

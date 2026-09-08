@@ -34,13 +34,48 @@ public sealed class UoDataContext : IDisposable
     /// <summary>Land art occupies 0..0x3FFF, static art 0x4000 upward.</summary>
     private const int MaxArt = 0x14000;
 
+    /// <summary>The cliloc file preferred when the client ships several.</summary>
+    private const string DefaultClilocLanguage = "enu";
+
     private readonly IUoFileProvider? _gumps;
     private readonly IUoFileProvider? _art;
     private readonly VerdataPatchSet _verdata;
 
-    private readonly Lazy<ClilocTable> _clilocs;
     private readonly Lazy<AsciiFonts> _asciiFonts;
     private readonly Lazy<UnicodeFonts> _unicodeFonts;
+
+    /// <summary>Cliloc file per language code, keyed case-insensitively.</summary>
+    private readonly IReadOnlyDictionary<string, string> _clilocPaths;
+
+    /// <summary>
+    /// The chosen language and its deferred table, swapped together.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One object holding both, so the language and the strings can never
+    /// disagree: a reader takes a single reference and sees a matched pair.
+    /// </para>
+    /// <para>
+    /// <c>volatile</c> rather than a lock, because the read path is hot — a
+    /// localised element resolves text on every repaint, and background art
+    /// decodes resolve it off the UI thread — while a write happens when someone
+    /// picks a menu item. The keyword is what guarantees a reader cannot observe
+    /// the reference before the <see cref="Lazy{T}"/> it points at is built;
+    /// on a weakly ordered processor that is not otherwise assured.
+    /// <see cref="Lazy{T}"/> keeps its default <c>ExecutionAndPublication</c>
+    /// mode, so concurrent first readers block on one parse rather than starting
+    /// two.
+    /// </para>
+    /// <para>
+    /// Only one thread ever writes. Switching is a user action from the UI
+    /// thread, so no mutual exclusion between two switchers is provided — if
+    /// that ever stops being true, this needs a lock on the write side.
+    /// </para>
+    /// </remarks>
+    private volatile ClilocSelection _clilocs;
+
+    /// <summary>Shared by every installation that ships no cliloc file.</summary>
+    private static readonly Lazy<ClilocTable> NoClilocs = new(() => ClilocTable.Empty);
 
     private UoDataContext(
         string clientPath,
@@ -49,17 +84,20 @@ public sealed class UoDataContext : IDisposable
         VerdataPatchSet verdata,
         HueTable hues,
         TileDataTable tileData,
-        Lazy<ClilocTable> clilocs,
+        IReadOnlyDictionary<string, string> clilocPaths,
+        string? clilocLanguage,
         Lazy<AsciiFonts> asciiFonts,
         Lazy<UnicodeFonts> unicodeFonts)
     {
         ClientPath = clientPath;
+        _clilocPaths = clilocPaths;
+        ClilocLanguages = OrderLanguages(clilocPaths.Keys);
+        _clilocs = Select(clilocPaths, ClilocLanguages, clilocLanguage);
         _gumps = gumps;
         _art = art;
         _verdata = verdata;
         Hues = hues;
         TileData = tileData;
-        _clilocs = clilocs;
         _asciiFonts = asciiFonts;
         _unicodeFonts = unicodeFonts;
     }
@@ -89,7 +127,84 @@ public sealed class UoDataContext : IDisposable
     /// <see cref="Lazy{T}"/> defaults to <c>ExecutionAndPublication</c>, and text
     /// is rendered from background art decodes as well as from the UI thread.
     /// </remarks>
-    public ClilocTable Clilocs => _clilocs.Value;
+    public ClilocTable Clilocs => _clilocs.Table.Value;
+
+    /// <summary>
+    /// The cliloc file extension currently read, such as <c>enu</c>, or null
+    /// when the installation ships none.
+    /// </summary>
+    public string? ClilocLanguage => _clilocs.Language;
+
+    /// <summary>
+    /// The cliloc files this installation ships, as their file extensions.
+    /// </summary>
+    /// <remarks>
+    /// Extensions, deliberately, rather than language names. Shard clients
+    /// rewrite these files freely and the extension is not a reliable claim
+    /// about the contents — one client in the test matrix ships Italian text
+    /// under <c>.enu</c> — so presenting <c>enu</c> and letting the author read
+    /// the strings beats asserting "English" and being wrong.
+    /// </remarks>
+    public IReadOnlyList<string> ClilocLanguages { get; }
+
+    /// <summary>
+    /// True when the installation ships a cliloc file.
+    /// </summary>
+    /// <remarks>
+    /// Answered from the directory listing, never by reading the file: asking
+    /// whether strings exist must not be what parses 124,000 of them.
+    /// </remarks>
+    public bool HasClilocs => _clilocs.Language is not null;
+
+    /// <summary>
+    /// Switches to another of the installation's cliloc files.
+    /// </summary>
+    /// <remarks>
+    /// The table is replaced rather than the context reopened, because a
+    /// language is a display choice and reopening would throw away every decoded
+    /// gump alongside it. Loading stays deferred: switching costs nothing until
+    /// something asks for a string.
+    /// </remarks>
+    /// <returns>
+    /// False, with nothing changed, when the installation has no cliloc file
+    /// with that extension. A refusal rather than a throw because the usual
+    /// caller is a remembered setting: an author who last used <c>deu</c> and
+    /// then opens an English-only client is doing nothing wrong.
+    /// </returns>
+    public bool UseClilocLanguage(string language)
+    {
+        ArgumentNullException.ThrowIfNull(language);
+
+        if (!_clilocPaths.TryGetValue(language, out string? path))
+        {
+            return false;
+        }
+
+        string normalised = language.ToLowerInvariant();
+
+        // Re-selecting what is loaded must not discard a parsed table.
+        if (string.Equals(_clilocs.Language, normalised, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        _clilocs = new ClilocSelection(
+            normalised, new Lazy<ClilocTable>(() => ClilocTable.Load(path)));
+
+        return true;
+    }
+
+    /// <summary>
+    /// Reads the cliloc table now, on the calling thread.
+    /// </summary>
+    /// <remarks>
+    /// Exists so the application can pay the parse on a thread pool thread just
+    /// after opening a client, instead of the first hover over a cliloc id
+    /// paying it on the UI thread. Scheduling is the caller's business: a
+    /// background task started down here would have no cancellation and could
+    /// outlive <see cref="Dispose"/>.
+    /// </remarks>
+    public void PreloadClilocs() => _ = Clilocs;
 
     public AsciiFonts AsciiFonts => _asciiFonts.Value;
 
@@ -145,8 +260,15 @@ public sealed class UoDataContext : IDisposable
     }
 
     /// <summary>Opens an installation.</summary>
+    /// <param name="clientPath">The installation directory.</param>
+    /// <param name="clilocLanguage">
+    /// Which cliloc file to read, as its extension. Null or an extension this
+    /// installation does not ship falls back to <c>enu</c>, then to whatever it
+    /// does ship — an author's remembered choice must not stop a different
+    /// client from opening.
+    /// </param>
     /// <exception cref="DirectoryNotFoundException">The path does not exist.</exception>
-    public static UoDataContext Open(string clientPath)
+    public static UoDataContext Open(string clientPath, string? clilocLanguage = null)
     {
         ArgumentNullException.ThrowIfNull(clientPath);
 
@@ -173,14 +295,13 @@ public sealed class UoDataContext : IDisposable
                 ? TileDataTable.Load(tilePath)
                 : TileDataTable.Empty;
 
-            // Paths resolved now, contents read on first use. Find() only
-            // probes the directory, so a missing file is still reported by
-            // Validate and still yields an empty table here.
-            string? clilocPath = Find(clientPath, "cliloc.enu");
-            string? fontPath = Find(clientPath, "fonts.mul");
+            // Paths resolved now, contents read on first use. One directory
+            // pass builds the whole code-to-file map, which subsumes what a
+            // per-name Find would do and costs less than the single lookup it
+            // replaces.
+            Dictionary<string, string> clilocPaths = FindClilocs(clientPath);
 
-            Lazy<ClilocTable> clilocs = new(() =>
-                clilocPath is not null ? ClilocTable.Load(clilocPath) : ClilocTable.Empty);
+            string? fontPath = Find(clientPath, "fonts.mul");
 
             Lazy<AsciiFonts> asciiFonts = new(() =>
                 fontPath is not null ? AsciiFonts.Load(fontPath) : AsciiFonts.Empty);
@@ -188,7 +309,8 @@ public sealed class UoDataContext : IDisposable
             Lazy<UnicodeFonts> unicodeFonts = new(() => UnicodeFonts.Load(clientPath));
 
             return new UoDataContext(
-                clientPath, gumps, art, verdata, hues, tileData, clilocs, asciiFonts, unicodeFonts);
+                clientPath, gumps, art, verdata, hues, tileData,
+                clilocPaths, clilocLanguage, asciiFonts, unicodeFonts);
         }
         catch
         {
@@ -245,6 +367,97 @@ public sealed class UoDataContext : IDisposable
     /// Clients ship inconsistent casing (<c>Gumpart.mul</c> vs <c>gumpart.mul</c>),
     /// which does not matter on Windows but breaks the Linux and macOS builds.
     /// </remarks>
+    /// <summary>
+    /// Every <c>cliloc.&lt;code&gt;</c> the installation ships, keyed by code.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The stem has to be exactly <c>cliloc</c>. That is what excludes the
+    /// numbered <c>clilocNN.enu</c> chunks pre-2002 clients ship, which
+    /// <see cref="ClilocTable"/> deliberately cannot read, and equally a
+    /// <c>cliloc.enu.bak</c> someone left beside the real one.
+    /// </para>
+    /// <para>
+    /// Nothing is validated here beyond the name. Confirming a candidate really
+    /// holds strings would mean parsing every one of them at open time, which is
+    /// the cost the deferred load exists to avoid; a stray <c>cliloc.old</c> is
+    /// listed and, if chosen, reads as an empty table.
+    /// </para>
+    /// <para>
+    /// First name wins, so a case-sensitive filesystem holding both
+    /// <c>cliloc.enu</c> and <c>CLILOC.ENU</c> yields one entry rather than
+    /// throwing.
+    /// </para>
+    /// </remarks>
+    private static Dictionary<string, string> FindClilocs(string directory)
+    {
+        Dictionary<string, string> found = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string candidate in Directory.EnumerateFiles(directory))
+        {
+            if (!string.Equals(
+                    Path.GetFileNameWithoutExtension(candidate),
+                    "cliloc",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string extension = Path.GetExtension(candidate);
+
+            // ".enu" -> "enu". A bare "cliloc" with no extension is not one.
+            if (extension.Length > 1)
+            {
+                found.TryAdd(extension[1..].ToLowerInvariant(), candidate);
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The discovered codes, <c>enu</c> first then alphabetical.</summary>
+    /// <remarks>
+    /// English first because practically every client ships it and it is what
+    /// most gump scripts were written against; the rest ordinally, so the list
+    /// does not depend on directory order or on the current culture.
+    /// </remarks>
+    private static IReadOnlyList<string> OrderLanguages(IEnumerable<string> codes) =>
+        [.. codes
+            .Select(static code => code.ToLowerInvariant())
+            .OrderByDescending(static code => code == DefaultClilocLanguage)
+            .ThenBy(static code => code, StringComparer.Ordinal)];
+
+    /// <summary>
+    /// Picks the cliloc file to read, honouring a remembered choice.
+    /// </summary>
+    /// <remarks>
+    /// A remembered code the installation does not have falls back to the
+    /// preferred one rather than to nothing: an author's last choice must not
+    /// stop a different client's strings from appearing. The path is captured
+    /// here so the deferred load closes over a string rather than the map.
+    /// </remarks>
+    private static ClilocSelection Select(
+        IReadOnlyDictionary<string, string> paths,
+        IReadOnlyList<string> ordered,
+        string? requested)
+    {
+        string? code = requested is not null && paths.ContainsKey(requested)
+            ? requested.ToLowerInvariant()
+            : ordered.Count > 0 ? ordered[0] : null;
+
+        if (code is null)
+        {
+            return new ClilocSelection(null, NoClilocs);
+        }
+
+        string path = paths[code];
+
+        return new ClilocSelection(code, new Lazy<ClilocTable>(() => ClilocTable.Load(path)));
+    }
+
+    /// <summary>A cliloc language and the table read for it, as one value.</summary>
+    private sealed record ClilocSelection(string? Language, Lazy<ClilocTable> Table);
+
     private static string? Find(string directory, string fileName)
     {
         string direct = Path.Combine(directory, fileName);

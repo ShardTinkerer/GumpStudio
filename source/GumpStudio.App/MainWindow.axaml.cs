@@ -42,6 +42,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly MenuItem _exportMenu = null!;
     private readonly MenuItem _moveToPageMenu = null!;
     private readonly DockControl _layout = null!;
+    private readonly ClilocPanel _clilocPanel = null!;
 
     /// <summary>
     /// Width of a row in the hue and font dropdowns.
@@ -74,6 +75,17 @@ public sealed partial class MainWindow : Window, IDisposable
     private List<Element>? _listedElements;
     private bool _layoutRestored;
 
+    /// <summary>
+    /// The cliloc field whose browse button was clicked, if any.
+    /// </summary>
+    /// <remarks>
+    /// The row and its element, never the <c>TextBox</c>: every refresh rebuilds
+    /// the property panel, so a remembered control can already be an orphan by
+    /// the time the browser answers. A <see cref="PropertyRow"/> closes over the
+    /// element type rather than an instance, so it cannot go stale.
+    /// </remarks>
+    private (Element Element, PropertyRow Row)? _pendingCliloc;
+
     public MainWindow()
         : this(new EditorSession())
     {
@@ -96,6 +108,7 @@ public sealed partial class MainWindow : Window, IDisposable
         ToolboxPanel toolboxPanel = new();
         ElementsPanel elementsPanel = new();
         PropertiesPanel propertiesPanel = new();
+        ClilocPanel clilocPanel = new();
 
         // Dock asks its dockables for content, so the panels are handed over
         // rather than looked up. Each is wrapped in the factory delegate Dock
@@ -106,6 +119,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Fill("ToolboxTool", toolboxPanel);
         Fill("ElementsTool", elementsPanel);
         Fill("PropertiesTool", propertiesPanel);
+        Fill("ClilocTool", clilocPanel);
 
         _canvas = canvasPanel.Canvas;
         _scroller = canvasPanel.Scroller;
@@ -113,6 +127,7 @@ public sealed partial class MainWindow : Window, IDisposable
         _toolbox = toolboxPanel.Items;
         _elementList = elementsPanel.List;
         _propertyPanel = propertiesPanel.Rows;
+        _clilocPanel = clilocPanel;
         _layout = this.FindControl<DockControl>("Layout")!;
         _status = this.FindControl<TextBlock>("StatusText")!;
         _exportMenu = this.FindControl<MenuItem>("MenuExport")!;
@@ -133,8 +148,24 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _elementList.SelectionChanged += OnElementListSelectionChanged;
 
-        _session.DocumentChanged += (_, _) => { _listedElements = null; RefreshAll(); };
+        _session.DocumentChanged += (_, _) =>
+        {
+            _listedElements = null;
+            _pendingCliloc = null;
+
+            RefreshAll();
+        };
         _session.PageChanged += (_, _) => { _listedElements = null; RefreshAll(); };
+
+        // Its own event, not RefreshAll: that runs on every page switch, and
+        // re-binding 124,000 rows each time would be felt.
+        _session.ClilocsChanged += (_, _) => RefreshClilocPanel();
+
+        _clilocPanel.EntryChosen += (_, id) => Guarded(() => ApplyChosenCliloc(id));
+        _clilocPanel.LanguageChosen += (_, code) =>
+            _ = GuardedAsync(() => _session.UseClilocLanguageAsync(code));
+
+        _clilocPanel.ShowStatus("No client loaded.");
 
         BuildToolbox();
         WireMenus();
@@ -280,12 +311,165 @@ public sealed partial class MainWindow : Window, IDisposable
         SetStatus("Panel layout reset.");
     }
 
+    /// <summary>
+    /// The cliloc browser, for tests.
+    /// </summary>
+    /// <remarks>
+    /// Exposed rather than found in the tree: Dock builds a tool's content
+    /// through a deferred content control, so the panel is not reliably a
+    /// logical descendant before the window is shown.
+    /// </remarks>
+    internal ClilocPanel Cliloc => _clilocPanel;
+
+    /// <summary>The property rows currently built, for tests.</summary>
+    internal StackPanel Properties => _propertyPanel;
+
+    /// <summary>
+    /// The toolbox buttons, for tests that need an element on the page.
+    /// </summary>
+    /// <remarks>
+    /// Clicking one is the path a test can drive end to end: it adds the
+    /// element, selects it and rebuilds the panels, where the canvas raises its
+    /// selection event from pointer input a headless test cannot produce.
+    /// </remarks>
+    internal ItemsControl Toolbox => _toolbox;
+
+    /// <summary>Shows who wrote this and which build it is.</summary>
+    private async Task ShowAboutAsync()
+    {
+        AboutWindow about = new();
+
+        await about.ShowDialog(this).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Brings the cliloc browser forward and points it at an id.
+    /// </summary>
+    /// <remarks>
+    /// The browse button on a cliloc field opens this panel rather than a
+    /// dialog, because the panel is where the language selector and the whole
+    /// table already live - and because a modal list of 124,000 strings cannot
+    /// be left open beside the layout it is being used to edit.
+    /// </remarks>
+    private void RevealCliloc(int seedId)
+    {
+        if (this.FindControl<MenuItem>("MenuPanelCliloc") is { IsChecked: false } item)
+        {
+            item.IsChecked = true;
+
+            // Through TogglePanel, so restoring and saving the layout stay in
+            // one place. Setting IsChecked raises no Click of its own.
+            TogglePanel("ClilocTool", "MenuPanelCliloc");
+        }
+
+        // Restoring is not enough when the tool is tabbed behind another one.
+        if (_layout.Factory is { } factory
+            && this.FindNameScope()?.Find("ClilocTool") is IDockable dockable)
+        {
+            factory.SetActiveDockable(dockable);
+        }
+
+        _clilocPanel.SeedFilter(seedId);
+        _clilocPanel.FocusFilter();
+    }
+
+    /// <summary>Fills the cliloc browser from whatever the session has read.</summary>
+    private void RefreshClilocPanel()
+    {
+        _clilocPanel.Load(
+            _session.ClilocStrings ?? [], _session.ClilocLanguages, _session.ClilocLanguage);
+
+        if (_session.ClilocStrings is null)
+        {
+            _clilocPanel.ShowStatus(
+                _session.Data is null ? "No client loaded." : "Reading cliloc strings...");
+        }
+
+        ShowClilocTarget();
+
+        // A language switch changes what every localised element draws. The
+        // property rows need no rebuild: their hover cards are built as they
+        // open, so they read the new language on their own.
+        _canvas.InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Starts reading the cliloc table, without waiting for it.
+    /// </summary>
+    /// <remarks>
+    /// Not awaited on purpose. The read is a Burrows-Wheeler decompress and
+    /// around 124,000 strings; awaiting it here would hold a document named on
+    /// the command line behind a table nothing has asked for yet. It runs off
+    /// the UI thread and the panel fills in when it lands.
+    /// </remarks>
+    private void StartClilocWarmup()
+    {
+        if (_session.Data is null || _session.AreClilocsReady)
+        {
+            return;
+        }
+
+        _clilocPanel.ShowStatus("Reading cliloc strings...");
+
+        _ = GuardedAsync(_session.LoadClilocsAsync);
+    }
+
+    /// <summary>
+    /// What the browser's Apply would write to.
+    /// </summary>
+    /// <remarks>
+    /// A browse button names its own row, which is unambiguous. Without one
+    /// there is exactly one row worth guessing at: a localised area's whole
+    /// content <em>is</em> a cliloc, so someone who selects one and picks a
+    /// string means that. Nothing is guessed for "Tooltip cliloc", which every
+    /// element has - choosing between it and "Cliloc id" on the author's behalf
+    /// is the sort of surprise a browse button exists to avoid.
+    /// </remarks>
+    private (Element Element, PropertyRow Row)? ClilocTarget()
+    {
+        if (_pendingCliloc is { } pending
+            && _session.Canvas.Selection.Count == 1
+            && ReferenceEquals(_session.Canvas.Selection[0], pending.Element))
+        {
+            return pending;
+        }
+
+        return _session.Canvas.Selection is [HtmlElement { ContentKind: HtmlContentKind.Localized } html]
+            && PropertyRow.For(html).FirstOrDefault(
+                r => r.Kind == PropertyEditorKind.Cliloc) is { } row
+            ? (html, row)
+            : null;
+    }
+
+    /// <summary>Tells the browser which field it would write to.</summary>
+    private void ShowClilocTarget() =>
+        _clilocPanel.ShowTarget(ClilocTarget() is { } target ? target.Row.Name : null);
+
+    private void ApplyChosenCliloc(int clilocId)
+    {
+        if (ClilocTarget() is not { } target)
+        {
+            SetStatus("Select a cliloc field first, or use its browse button.");
+
+            return;
+        }
+
+        _pendingCliloc = null;
+
+        ApplyProperty(target.Element, target.Row, clilocId);
+        RefreshProperties();
+
+        SetStatus(string.Create(
+            CultureInfo.InvariantCulture, $"{target.Row.Name} set to {clilocId}."));
+    }
+
     /// <summary>The hideable panels, each with the menu item that toggles it.</summary>
     private static readonly (string DockableId, string MenuName)[] Panels =
     [
         ("ToolboxTool", "MenuPanelToolbox"),
         ("ElementsTool", "MenuPanelElements"),
         ("PropertiesTool", "MenuPanelProperties"),
+        ("ClilocTool", "MenuPanelCliloc"),
     ];
 
     /// <summary>
@@ -299,7 +483,9 @@ public sealed partial class MainWindow : Window, IDisposable
     private static readonly (string PaneId, double Proportion)[] DefaultProportions =
     [
         ("ToolboxPane", 0.13),
-        ("CanvasPane", 0.6),
+        ("CenterPane", 0.6),
+        ("CanvasPane", 0.75),
+        ("ClilocPane", 0.25),
         ("RightPane", 0.27),
         ("ElementsPane", 0.35),
         ("PropertiesPane", 0.65),
@@ -552,7 +738,9 @@ public sealed partial class MainWindow : Window, IDisposable
         Click("MenuPanelToolbox", () => TogglePanel("ToolboxTool", "MenuPanelToolbox"));
         Click("MenuPanelElements", () => TogglePanel("ElementsTool", "MenuPanelElements"));
         Click("MenuPanelProperties", () => TogglePanel("PropertiesTool", "MenuPanelProperties"));
+        Click("MenuPanelCliloc", () => TogglePanel("ClilocTool", "MenuPanelCliloc"));
         Click("MenuResetLayout", ResetLayout);
+        ClickAsync("MenuAbout", ShowAboutAsync);
         Click("MenuZoomIn", () => StepZoom(up: true));
         Click("MenuZoomOut", () => StepZoom(up: false));
         Click("MenuZoomReset", () => SetZoom(1.0));
@@ -1421,6 +1609,8 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             _propertyPanel.Children.Add(BuildRow(element, row));
         }
+
+        ShowClilocTarget();
     }
 
     private Grid BuildRow(Element element, PropertyRow row)
@@ -1442,6 +1632,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
         ToolTip.SetTip(label, row.Description ?? row.Name);
 
+        if (row.Kind == PropertyEditorKind.Cliloc)
+        {
+            AttachClilocTip(label, element, row);
+        }
+
         Grid.SetColumn(label, 0);
         grid.Children.Add(label);
 
@@ -1452,6 +1647,7 @@ public sealed partial class MainWindow : Window, IDisposable
             PropertyEditorKind.GumpId => BuildBrowsableIdEditor(element, row, ArtBrowserKind.Gump),
             PropertyEditorKind.ItemId => BuildBrowsableIdEditor(element, row, ArtBrowserKind.Item),
             PropertyEditorKind.Color => BuildColorEditor(element, row),
+            PropertyEditorKind.Cliloc => BuildClilocEditor(element, row),
             PropertyEditorKind.Hue => BuildPickerEditor(element, row, HueEntries()),
             PropertyEditorKind.Font => BuildPickerEditor(element, row, FontEntries()),
             _ => BuildTextEditor(element, row),
@@ -1544,6 +1740,92 @@ public sealed partial class MainWindow : Window, IDisposable
         layout.Children.Add(browse);
 
         return layout;
+    }
+
+    /// <summary>
+    /// A cliloc id, with a browse button that reveals the cliloc panel.
+    /// </summary>
+    /// <remarks>
+    /// No dialog, unlike the art fields: the browser is a dockable panel, so the
+    /// button brings it forward and seeds its filter instead of blocking on a
+    /// modal. The field stays typeable for anyone who knows the number.
+    /// </remarks>
+    private Grid BuildClilocEditor(Element element, PropertyRow row)
+    {
+        Grid layout = new() { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+
+        TextBox box = BuildTextEditor(element, row);
+
+        AttachClilocTip(box, element, row);
+
+        Grid.SetColumn(box, 0);
+        layout.Children.Add(box);
+
+        Button browse = new()
+        {
+            Content = "…",
+            Width = 30,
+            Margin = new Avalonia.Thickness(4, 0, 0, 0),
+            IsEnabled = _session.Data is not null,
+        };
+
+        browse.Click += (_, _) =>
+        {
+            _pendingCliloc = (element, row);
+
+            ShowClilocTarget();
+            StartClilocWarmup();
+            RevealCliloc(row.Read(element) is int id ? id : 0);
+        };
+
+        Grid.SetColumn(browse, 1);
+        layout.Children.Add(browse);
+
+        return layout;
+    }
+
+    /// <summary>
+    /// Gives a control a cliloc card that is built as it opens.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Lazily, not eagerly. The card depends on four things that move
+    /// independently - the id, the arguments, the language, and whether the
+    /// table has been read yet - so building it on open is the only version that
+    /// is never stale, and it needs no entry in
+    /// <see cref="_propertyValueRefreshers"/> and no rebuild on a language
+    /// switch. It is also the cheap way round: the property panel is rebuilt on
+    /// every selection change, and a card three text blocks deep for a row
+    /// nobody hovers is exactly the per-rebuild cost the drag path avoids.
+    /// </para>
+    /// <para>
+    /// The placeholder is not decoration. Avalonia raises no opening event at
+    /// all for a control whose tip is unset, so there has to be something there
+    /// to replace.
+    /// </para>
+    /// </remarks>
+    private void AttachClilocTip(Control host, Element element, PropertyRow row)
+    {
+        if (ToolTip.GetTip(host) is null)
+        {
+            ToolTip.SetTip(host, row.Description ?? row.Name);
+        }
+
+        ToolTip.AddToolTipOpeningHandler(host, (_, _) =>
+        {
+            // Hovering must never be what pays for the table: start the read
+            // and say so, rather than freezing the pointer over the row.
+            StartClilocWarmup();
+
+            ToolTip.SetTip(host, ClilocTip.Build(
+                row.Read(element) is int id ? id : 0,
+                row.ReadArguments?.Invoke(element) ?? string.Empty,
+                _session.ClilocLanguage,
+                _session.ResolveCliloc,
+                _session.Data is null
+                    ? "No client loaded."
+                    : _session.AreClilocsReady ? null : "Reading the client's cliloc strings..."));
+        });
     }
 
     /// <summary>
@@ -1920,6 +2202,10 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _canvas.InvalidateVisual();
         RefreshElementList();
+
+        // Switching an area between markup and a localised string changes
+        // whether the browser has anything to write to.
+        ShowClilocTarget();
     }
 
     /// <summary>
@@ -2227,6 +2513,7 @@ public sealed partial class MainWindow : Window, IDisposable
                 ForgetPickerEntries();
 
                 RefreshAll();
+                StartClilocWarmup();
 
                 return;
             }
@@ -2275,7 +2562,9 @@ public sealed partial class MainWindow : Window, IDisposable
         _session.Settings.Save();
 
         _session.MeasureActivePage();
+
         RefreshAll();
+        StartClilocWarmup();
     }
 
     private void SetStatus(string message, bool isError = false)

@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="GumpStudio.App.MainWindow"
         Title="GumpStudio"
+        Icon="/Assets/gumpstudio.ico"
         Width="1280" Height="860"
         MinWidth="900" MinHeight="600">
 
@@ -80,6 +81,8 @@
                   ToggleType="CheckBox" IsChecked="True" />
         <MenuItem Header="_Properties panel" Name="MenuPanelProperties"
                   ToggleType="CheckBox" IsChecked="True" />
+        <MenuItem Header="_Cliloc panel" Name="MenuPanelCliloc"
+                  ToggleType="CheckBox" IsChecked="True" />
         <Separator />
         <MenuItem Header="_Reset panel layout" Name="MenuResetLayout" />
       </MenuItem>
@@ -95,6 +98,10 @@
         <MenuItem Header="_Clear page" Name="MenuClearPage" />
         <Separator />
         <MenuItem Header="_Move selection to page" Name="MenuMoveToPage" />
+      </MenuItem>
+
+      <MenuItem Header="_Help">
+        <MenuItem Header="_About GumpStudio…" Name="MenuAbout" />
       </MenuItem>
 
     </Menu>
@@ -136,10 +143,27 @@
 
           <ProportionalDockSplitter x:Name="LeftSplitter" Id="LeftSplitter" />
 
-          <DocumentDock x:Name="CanvasPane" Id="CanvasPane" Proportion="0.6"
-                        CanCreateDocument="False" IsCollapsable="False">
-            <Document x:Name="GumpDocument" Id="GumpDocument" Title="Gump" CanClose="False" />
-          </DocumentDock>
+          <!--
+            The canvas and the cliloc browser share the middle column. The
+            browser is a wide, short list - an id and a sentence - so it belongs
+            under the canvas rather than beside it, where it would either crush
+            the gump or truncate every string.
+          -->
+          <ProportionalDock x:Name="CenterPane" Id="CenterPane"
+                            Orientation="Vertical" Proportion="0.6">
+
+            <DocumentDock x:Name="CanvasPane" Id="CanvasPane" Proportion="0.75"
+                          CanCreateDocument="False" IsCollapsable="False">
+              <Document x:Name="GumpDocument" Id="GumpDocument" Title="Gump" CanClose="False" />
+            </DocumentDock>
+
+            <ProportionalDockSplitter x:Name="ClilocSplitter" Id="ClilocSplitter" />
+
+            <ToolDock x:Name="ClilocPane" Id="ClilocPane" Proportion="0.25" Alignment="Bottom">
+              <Tool x:Name="ClilocTool" Id="ClilocTool" Title="Cliloc" CanClose="False" />
+            </ToolDock>
+
+          </ProportionalDock>
 
           <ProportionalDockSplitter x:Name="RightSplitter" Id="RightSplitter" />
 

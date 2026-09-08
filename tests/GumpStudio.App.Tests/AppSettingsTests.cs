@@ -141,6 +141,45 @@ public class AppSettingsTests
         Assert.Equal(7, AppSettings.Load(path).GridHeight);
     }
 
+    /// <summary>
+    /// The remembered cliloc language survives a round trip.
+    /// </summary>
+    /// <remarks>
+    /// Null by default, meaning "whatever the client offers first" — a stored
+    /// <c>enu</c> would otherwise be indistinguishable from a deliberate choice
+    /// on a client that ships no English file.
+    /// </remarks>
+    [Fact]
+    public void TheClilocLanguageDefaultsToNoneAndSurvivesARoundTrip()
+    {
+        using TempDirectory directory = new();
+        string path = PathIn(directory);
+
+        AppSettings fresh = AppSettings.Load(path);
+
+        Assert.Null(fresh.ClilocLanguage);
+
+        fresh.ClilocLanguage = "deu";
+        fresh.Save();
+
+        Assert.Equal("deu", AppSettings.Load(path).ClilocLanguage);
+    }
+
+    /// <summary>A settings file written before this setting existed still loads.</summary>
+    [Fact]
+    public void ASettingsFileFromBeforeTheLanguageStillLoads()
+    {
+        using TempDirectory directory = new();
+        string path = PathIn(directory);
+
+        File.WriteAllText(path, "{ \"GridWidth\": 8 }");
+
+        AppSettings settings = AppSettings.Load(path);
+
+        Assert.Equal(8, settings.GridWidth);
+        Assert.Null(settings.ClilocLanguage);
+    }
+
     [Fact]
     public void TheSessionSharesOneSettingsInstance()
     {

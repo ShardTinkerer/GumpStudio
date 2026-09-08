@@ -1,0 +1,52 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.AboutWindow"
+        Title="About GumpStudio"
+        Width="454"
+        SizeToContent="Height"
+        CanResize="False"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel>
+
+    <!--
+      Full-bleed at the top, at its native 454x158, which is where the original
+      about box put it and why this window is 454 wide.
+    -->
+    <Image Name="Graphic" Stretch="None" />
+
+    <StackPanel Margin="16" Spacing="12">
+
+      <StackPanel Spacing="2">
+        <TextBlock Name="VersionText" FontWeight="Bold" Foreground="#C8C8C8" />
+        <TextBlock Name="RuntimeText" Foreground="Gray" />
+      </StackPanel>
+
+      <TextBlock Text="This rewrite" FontWeight="Bold" Foreground="LightSkyBlue" />
+
+      <TextBlock TextWrapping="Wrap" Foreground="#C8C8C8"
+                 Text="A rebuild of GumpStudio on .NET and Avalonia: the same editor, without the Windows-only drawing stack, the plugin folder or the static loaders that made changing the client path a restart." />
+
+      <TextBlock Text="The original" FontWeight="Bold" Foreground="LightSkyBlue" />
+
+      <!--
+        The 1.8 credits, kept as they were written. The two addresses the
+        original linked - gumpstudio.com and orbsydia.net - are both gone, so
+        they are not repeated here as links that go nowhere.
+      -->
+      <TextBlock TextWrapping="Wrap" Foreground="#C8C8C8"
+                 Text="Gump Studio was designed and written by Bradley Uffner in 2004. It makes extensive use of a modified version of the UOSDK written by Krrios. Artwork was created by Melanius, and several more ideas were contributed by the RunUO community. Special thanks go to DarkStorm of the Wolfpack emulator for helping to decode unifont.mul, allowing UO fonts to be displayed correctly." />
+
+      <TextBlock Text="Ultima Online is a trademark of Electronic Arts. This is an unofficial tool and ships none of the client's data."
+                 TextWrapping="Wrap" Foreground="Gray" />
+
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+        <Button Name="CloseButton" Content="Close" MinWidth="90" IsDefault="True" IsCancel="True" />
+      </StackPanel>
+
+    </StackPanel>
+
+  </StackPanel>
+
+</Window>

@@ -31,6 +31,19 @@ public sealed class AppSettings
     /// <summary>The Ultima Online installation to read art from.</summary>
     public string? ClientPath { get; set; }
 
+    /// <summary>
+    /// Which cliloc language the editor reads, as a file extension code.
+    /// </summary>
+    /// <remarks>
+    /// Null means whatever the client offers first, which is English wherever it
+    /// is present. Remembered because it changes what every localised area on
+    /// the canvas says, and someone building gumps for a German shard would
+    /// otherwise re-pick it on every launch. A code the next client happens not
+    /// to ship is ignored rather than honoured, so this can never be what stops
+    /// an installation's strings from appearing.
+    /// </remarks>
+    public string? ClilocLanguage { get; set; }
+
     /// <summary>Design-grid spacing in gump pixels.</summary>
     public int GridWidth { get; set; } = 5;
 

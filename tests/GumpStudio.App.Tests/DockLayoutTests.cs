@@ -24,10 +24,10 @@ namespace GumpStudio.App.Tests;
 public class DockLayoutTests
 {
     private static readonly string[] HideablePanels =
-        ["ToolboxTool", "ElementsTool", "PropertiesTool"];
+        ["ToolboxTool", "ElementsTool", "PropertiesTool", "ClilocTool"];
 
     private static readonly string[] PanelMenuItems =
-        ["MenuPanelToolbox", "MenuPanelElements", "MenuPanelProperties"];
+        ["MenuPanelToolbox", "MenuPanelElements", "MenuPanelProperties", "MenuPanelCliloc"];
 
     private static EditorSession SessionIn(TempDirectory directory) =>
         new(AppSettings.Load(Path.Combine(directory.Path, "settings.json")));
@@ -55,6 +55,7 @@ public class DockLayoutTests
             Assert.NotNull(Dockable(window, "ToolboxTool"));
             Assert.NotNull(Dockable(window, "ElementsTool"));
             Assert.NotNull(Dockable(window, "PropertiesTool"));
+            Assert.NotNull(Dockable(window, "ClilocTool"));
             Assert.NotNull(Dockable(window, "GumpDocument"));
         });
     }
@@ -134,8 +135,13 @@ public class DockLayoutTests
             using MainWindow window = new(session);
 
             Assert.Equal(0.13, ((IDock)Dockable(window, "ToolboxPane")!).Proportion, 3);
-            Assert.Equal(0.6, ((IDock)Dockable(window, "CanvasPane")!).Proportion, 3);
             Assert.Equal(0.27, ((IDock)Dockable(window, "RightPane")!).Proportion, 3);
+
+            // The canvas shares the middle column with the cliloc browser, so
+            // the 0.6 that used to be the canvas's is now the column's.
+            Assert.Equal(0.6, ((IDock)Dockable(window, "CenterPane")!).Proportion, 3);
+            Assert.Equal(0.75, ((IDock)Dockable(window, "CanvasPane")!).Proportion, 3);
+            Assert.Equal(0.25, ((IDock)Dockable(window, "ClilocPane")!).Proportion, 3);
         });
     }
 

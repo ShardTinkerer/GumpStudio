@@ -18,6 +18,7 @@ public enum PropertyEditorKind
     Font,
     Color,
     Choice,
+    Cliloc,
 }
 
 /// <summary>
@@ -55,6 +56,19 @@ public sealed class PropertyRow
     /// column but whose meaning is not obvious from it.
     /// </remarks>
     public string? Description { get; private set; }
+
+    /// <summary>
+    /// Where this cliloc row's substitution arguments live.
+    /// </summary>
+    /// <remarks>
+    /// The arguments are a different property on the same element -
+    /// <c>Arguments</c> for a localised area, <c>TooltipArguments</c> for a
+    /// tooltip - and a resolved string without them still reads
+    /// <c>~1_VAL~</c>, which is exactly what the hover preview exists to stop
+    /// showing. Carried here so the editor never has to match on a row's name
+    /// to find them.
+    /// </remarks>
+    public Func<Element, string>? ReadArguments { get; private init; }
 
     /// <summary>Attaches an explanation and returns the same row.</summary>
     public PropertyRow Describe(string description)
@@ -106,7 +120,11 @@ public sealed class PropertyRow
 
         // Every element can carry a tooltip: the client attaches one to whichever
         // element it created last, which makes it a per-element property.
-        rows.Add(Integer("Tooltip cliloc", e => e.TooltipClilocId, (e, v) => e.TooltipClilocId = v)
+        rows.Add(Cliloc(
+                "Tooltip cliloc",
+                e => e.TooltipClilocId,
+                (e, v) => e.TooltipClilocId = v,
+                e => e.TooltipArguments)
             .Describe("Cliloc id shown when the player hovers this element. 0 for none."));
 
         rows.Add(Text("Tooltip args", e => e.TooltipArguments, (e, v) => e.TooltipArguments = v)
@@ -241,8 +259,11 @@ public sealed class PropertyRow
                     e => ((HtmlElement)e).ContentKind.ToString(),
                     (e, v) => ((HtmlElement)e).ContentKind = Enum.Parse<HtmlContentKind>(v));
                 yield return Text("Html", e => ((HtmlElement)e).Html, (e, v) => ((HtmlElement)e).Html = v);
-                yield return Integer("Cliloc id",
-                    e => ((HtmlElement)e).ClilocId, (e, v) => ((HtmlElement)e).ClilocId = v);
+                yield return Cliloc(
+                    "Cliloc id",
+                    e => ((HtmlElement)e).ClilocId,
+                    (e, v) => ((HtmlElement)e).ClilocId = v,
+                    e => ((HtmlElement)e).Arguments);
                 yield return Boolean("Scrollbar",
                     e => ((HtmlElement)e).ShowScrollbar, (e, v) => ((HtmlElement)e).ShowScrollbar = v);
                 yield return Boolean("Background",
@@ -253,7 +274,10 @@ public sealed class PropertyRow
                         "Text colour for a localised area. Not a hue — a plain colour, "
                         + "which the client stores as RGB555.");
                 yield return Text("Cliloc args",
-                    e => ((HtmlElement)e).Arguments, (e, v) => ((HtmlElement)e).Arguments = v);
+                        e => ((HtmlElement)e).Arguments, (e, v) => ((HtmlElement)e).Arguments = v)
+                    .Describe(
+                        "Substitution arguments for the cliloc, separated by @. "
+                        + "A value of #1234 is itself a cliloc id.");
 
                 yield return Font();
                 break;
@@ -288,6 +312,17 @@ public sealed class PropertyRow
     private static PropertyRow Id(
         string name, PropertyEditorKind kind, Func<Element, int> get, Action<Element, int> set) =>
         new(name, kind, e => get(e), (e, v) => set(e, ToInt(v)));
+
+    /// <summary>A cliloc id, paired with the property holding its arguments.</summary>
+    private static PropertyRow Cliloc(
+        string name,
+        Func<Element, int> get,
+        Action<Element, int> set,
+        Func<Element, string> arguments) =>
+        new(name, PropertyEditorKind.Cliloc, e => get(e), (e, v) => set(e, ToInt(v)))
+        {
+            ReadArguments = arguments,
+        };
 
     /// <summary>
     /// The preview font, as one row covering both the family and the face.

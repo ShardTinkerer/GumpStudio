@@ -210,6 +210,18 @@ files.
 Content is not a reliable assertion target. Shard clients rewrite these freely;
 one client in the test matrix ships Italian text under a `.enu` extension.
 
+**Languages are discovered by extension.** Every file whose stem is exactly
+`cliloc` is offered, keyed by its extension lower-cased, with `enu` preferred.
+The stem has to match exactly: that is what excludes the numbered IFF chunks
+below and a `cliloc.enu.bak` left beside the real one. Because of the Italian
+case above, the editor presents the extension itself and never claims to know
+which language it holds.
+
+**A tolerated tail.** The reader accepts up to 16 unparsed bytes after the last
+record, since a wrapped file is tried as a plain one first and noise
+desynchronises long before the end. A file truncated by more than that yields an
+empty table rather than a partial one.
+
 **Unsupported:** clients older than roughly 2002 ship numbered `clilocNN.enu`
 chunks inside an IFF `FORM`/`DATA` container. That format is not read.
 

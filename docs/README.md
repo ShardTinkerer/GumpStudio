@@ -9,6 +9,7 @@ the decompiled .NET Framework 4.8 WinForms port that lives in `src/`.
 | [architecture.md](architecture.md) | Project layout and the reasoning behind it |
 | [uo-file-formats.md](uo-file-formats.md) | Verified notes on the client data formats |
 | [testing.md](testing.md) | Running the tests, including against real UO clients |
+| [assets.md](assets.md) | The 1.8 artwork, and how it was recovered |
 
 ## Quick start
 

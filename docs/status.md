@@ -509,8 +509,10 @@ elements before `page 1` already expresses the same thing.
 
 - ~~A **hue picker**.~~ Built in [Phase 9](#phase-9--a-preview-worth-trusting-):
   a searchable dropdown of colour ramps on every hue row.
-- A **cliloc browser** for the HTML element's localised id. The preview resolves
-  clilocs now, so what is left is finding one by its text.
+- ~~A **cliloc browser** for the HTML element's localised id.~~ Built in
+  [Phase 11](#phase-11--finding-a-cliloc-): a dockable panel that searches
+  ~124,000 strings by text or by id, a hover preview on every cliloc field, and
+  a language selector the original had but never wired up.
 - Drag-to-reorder in the element list. The four ordering commands cover the same
   ground from the keyboard and the context menu.
 
@@ -1813,6 +1815,262 @@ work in its own right rather than a tail end of this one.
   client.
 - Page **rename** is still not possible. `GumpPage.Name` is shown in the
   move-to-page menu and nothing can set it.
+- The splash graphic is a **JPEG**, so it carries 2004 compression artefacts
+  around the lettering. It is kept byte-for-byte rather than cleaned up; a
+  redrawn or vectorised version would be new artwork, not recovered artwork.
+- `BwtDecoder` mis-decompresses at least one real file — the reference client's
+  `Cliloc.deu` — so that language reports no strings. Found by
+  [Phase 11](#phase-11--finding-a-cliloc-) reading more than English for the
+  first time; the other seven languages in that client are fine.
+
+---
+
+## Phase 11 — Finding a cliloc ✅
+
+Phase 9 made the canvas resolve clilocs, so a localised area finally previewed
+as words rather than as `#1044017`. What it did not give anyone was a way to
+*find* the number in the first place. Both cliloc fields — `Cliloc id` on an
+HTML area and `Tooltip cliloc`, which every element has — were bare integer text
+boxes, and the number in them said nothing about what a player would read.
+
+The 1.8 editor did ship a browser, `src/GumpStudioCore/Forms/ClilocBrowser.cs`,
+and it is worth being precise about what it was: a `ListBox` with **no search
+box at all**. It added all ~124,000 owner-drawn rows one at a time and left you
+to scroll. It also had a language combo, populated by globbing `Cliloc.*` in the
+client folder — and then it always loaded `new StringList("enu")` regardless, so
+the selector was decorative. Its `DrawItem` and `SelectedIndexChanged` handlers
+still carry the original author's `// TODO` comments, and the selection handler
+read from a cache field that aliased the very `ListBox` it was meant to back up.
+
+### The substitution rules moved out of the renderer
+
+`ElementPainter` held `Localized`, `Substitute` and `Value` privately. The
+properties editor now previews the same string on hover, and two copies of the
+`~1_THING~` grammar would drift, so they became
+`GumpStudio.Uo.Data.ClilocFormatter` — beside `ClilocTable`, because the
+placeholder grammar and the nested-`#1234` rule are properties of the cliloc
+*format*, not of the document model. The lookup arrives as a
+`Func<int, string?>`, so the renderer passes `IGumpArtSource.GetCliloc`, the
+editor passes the table's `GetText`, and a test passes a dictionary.
+
+The extraction was verified by the six facts in `ClilocPreviewTests` continuing
+to pass untouched. `ArgumentCount` is new, and reports the **highest** ordinal
+rather than how many placeholders there are: a string using only `~2_VAL~` still
+needs two `@`-separated values.
+
+### A language that is actually read
+
+`UoDataContext.Open` hard-coded `cliloc.enu`. A German- or Russian-only shard
+install therefore resolved nothing at all, with no explanation. Now one
+directory pass builds a code-to-file map, `ClilocLanguages` reports what the
+installation ships (ENU first, then ordinally), and `UseClilocLanguage` swaps the
+deferred table in place rather than reopening the client — reopening would
+re-index every UOP container to change one string table.
+
+The codes are **file extensions, not language names**. `docs/uo-file-formats.md`
+records a client in the test matrix shipping Italian text under `.enu`, so
+claiming to know the language would be a lie for exactly the installations that
+need this. The selection is remembered in `AppSettings.ClilocLanguage` and
+applied in `EditorSession.Adopt`, before anything can read the table; a
+remembered code the next client happens not to ship is ignored rather than
+honoured, so it can never be what stops an installation's strings appearing.
+
+`UseClilocLanguage` returns `false` for an unknown code rather than throwing,
+because the usual caller is a persisted setting and that is ordinary operation.
+The language and its table are one immutable `ClilocSelection` published through
+a `volatile` field: reads stay lock-free, which matters because `GetCliloc` runs
+once per localised element per repaint *and* from background art decodes.
+
+Exports are deliberately unaffected — every converter emits the numeric id, so a
+script exported under DEU is byte-identical to one exported under ENU.
+
+### The panel
+
+`Controls/ClilocPanel` is a Dock tool under the canvas, in a new vertical
+`CenterPane` beside the existing toolbox and right-hand column. Under, not
+beside: the browser is a wide, short list — an id and a sentence — and in the
+right-hand column it would either crush the gump or truncate every string.
+
+It takes `IReadOnlyList<ClilocEntry>` rather than a `UoDataContext`, which is
+what lets its filter, its count and its hand-off be tested with no Ultima
+installation present — something the art browser's own tests cannot do, since
+all of them skip without one.
+
+The search rule lives in `Controls/ClilocFilter` so it can be tested as a rule,
+with no dispatcher: an **id matches on a prefix** and **text matches anywhere**,
+both ordinal and case-insensitive, and a run of digits tries both — so `1044017`
+finds the id while `vendor` finds the text, with no mode to switch. Unlike the
+art browsers there is no `0x` form, because cliloc ids are decimal everywhere.
+Filtering is debounced 150 ms, as the art browser's is, and an empty query
+reuses the same list rather than copying 124,000 entries to say "all of them".
+
+### Visible by default, without the eager parse
+
+`ClilocTable.Entries` used to be `_entries.Values.OrderBy(e => e.Id)`, which
+re-sorted 124,000 entries on **every** enumeration — once per keystroke for a
+list that filters as you type. It is now a cached ordered snapshot, pinned by a
+test asserting the same reference comes back twice.
+
+The panel is on screen at first run, but reading the table is a Burrows-Wheeler
+decompress and ~124,000 strings, which is precisely what Phase 9 deferred. So
+visibility and population are separate: the panel says "Reading cliloc strings…"
+while `EditorSession.LoadClilocsAsync` reads it on a thread pool thread, caching
+its own in-flight task so a panel filling itself and a tooltip opening at the
+same moment share one parse.
+
+While that was open, the trial parse got cheaper. `TryParsePlain` built the
+entire dictionary — UTF-8 decoding included — before deciding a buffer was not a
+plain record stream, so a modern client allocated megabytes of garbage strings
+and threw them away on every load. It now walks the record headers first and
+decodes nothing. Language switching pays that trial again, which turned it from a
+one-off at startup into a recurring cost.
+
+### The hover card
+
+Hovering a cliloc id shows the id, the language, the raw string and — when the
+sibling arguments property is non-empty — the substituted form, resolved through
+the same `ClilocFormatter` the canvas uses, so the two cannot disagree. It
+distinguishes "no client", "0 means none" and "not in this client's cliloc file
+— the canvas shows #1044017" rather than showing nothing.
+
+The card is built as the tooltip opens, via `ToolTip.AddToolTipOpeningHandler`,
+not when the row is built. That is the only version that is never stale — the id,
+the arguments, the language and whether the table has been read all move
+independently — and it is the cheap way round, since the property panel is
+rebuilt on every selection change. Avalonia raises no opening event for a control
+whose tip is unset, so a placeholder string is set first and replaced in the
+handler; a test raises the event by hand to pin that framework behaviour across
+an Avalonia bump.
+
+### The hand-off
+
+`PropertyEditorKind.Cliloc` covers both fields, and the row carries a
+`ReadArguments` accessor so the card can find the arguments without matching on a
+row's name. The `…` button reveals the panel and seeds its filter instead of
+opening a dialog, and the window remembers the `(Element, PropertyRow)` pair —
+never the `TextBox`, which every refresh replaces.
+
+With no browse click, the panel writes to a localised area's `Cliloc id` when one
+is selected, and is disabled otherwise. Nothing is guessed for `Tooltip cliloc`:
+every element has one, and choosing between it and `Cliloc id` on the author's
+behalf is the kind of surprise a browse button exists to avoid. Every choice goes
+through `ApplyProperty`, so it is one undoable command like every other edit.
+
+### What this retires
+
+- The `_clilocCache` defect in the [defect inventory](#resource-and-performance):
+  an instance field on a per-edit form, which also aliased the `ListBox` it was
+  meant to back up, so the multi-megabyte file reloaded on every open.
+- The decorative language combo, which is now the feature it looked like.
+- `ClilocTable` had no non-client coverage at all, because its constructor is
+  private and no fixture wrote cliloc bytes. `ClilocFixture` writes the record
+  stream, so the tolerated 16-byte tail, the truncated tail, the UTF-8 length
+  rule and a garbage buffer are all pinned now. The MegaCliloc path still needs a
+  real client — that would take a BWT *encoder*.
+
+### What reading eight languages found
+
+Only `cliloc.enu` had ever been read, so nothing had exercised the rest. Every
+one of the eight files in the reference client is MegaCliloc-wrapped, and two of
+them fooled the trial parse: `Cliloc.cht`, two megabytes of it, walks as a valid
+record stream and lands inside the tolerated tail, yielding 345 entries of
+replacement characters. The walk now also rejects a stream whose records average
+more than 512 bytes — real cliloc records average well under 150, these average
+thousands — and the result is judged as text before it is accepted.
+
+That recovered six of the eight. `Cliloc.deu` does not decompress correctly at
+all, which is a defect in `BwtDecoder` rather than in this reading of it, and it
+is the reason `Parse` now returns an empty table when neither reading looks like
+text: a caller can render `#1044017` for a string it does not have, but it
+cannot tell that a string it was handed is nonsense. The real-client test asserts
+that contract — clean text or nothing — rather than a minimum entry count, since
+a shipped translation is often partial (this client's `Cliloc.chs` is 46 KB
+beside a 5 MB `Cliloc.enu`).
+
+---
+
+## Phase 12 — The 1.8 artwork comes back ✅
+
+The rewrite had no icon and no identity: Windows drew the generic .NET
+placeholder in the title bar and the taskbar, and there was nothing anywhere that
+said who wrote the editor this one reproduces. Both of those were sitting in the
+2004 build the whole time — the splash graphic base64-encoded inside a WinForms
+`.resx`, the icon in the executable's resource directory.
+
+`docs/assets.md` records how each was extracted and why it is byte-for-byte
+rather than re-encoded. Two things worth repeating here: 1.8 embedded the *same*
+JPEG in both its splash form and its about box, so there is one asset and both
+windows share it; and there are **two** original icons — the "Gump Studio"
+wordmark on the executable and a `GUMP` document sheet in the about form's own
+resources — which are different images that happen to be the same byte length.
+The wordmark is the application's identity, so that is the one that ships.
+
+### The splash
+
+`SplashWindow` is the original's behaviour: borderless, centred, always on top,
+gone after two seconds or on a click. The graphic is shown at its native 454x158
+and the window is sized to match, because it is a JPEG of a Photoshop
+composition — interpolation smears the lettering and nearest-neighbour makes the
+marbling blocky, so it is scaled by neither.
+
+The original ran its splash on a second thread and pumped
+`Application.DoEvents()` in a sleep loop to keep it painting. Here it is an
+ordinary window on the UI thread with a `DispatcherTimer`.
+
+**The editor is not constructed until the splash closes**, and that ordering is
+the whole design. Building `MainWindow` is synchronous and takes long enough to
+matter, and the dispatcher cannot paint while it runs — so constructing it first
+made the splash appear at the same instant as the window it was meant to precede.
+That is the one thing a splash screen must not do, and it is exactly what the
+first attempt did.
+
+Deferring it costs a `ShutdownMode`: while only the splash is open there is no
+main window, so the lifetime would read the splash closing as the last window
+closing and shut down mid-startup. It is held at `OnExplicitShutdown` until the
+editor exists and then handed over to it, which is also what keeps closing the
+editor exiting the process.
+
+### The about box
+
+454 wide because the graphic is, sat full-bleed across the top exactly as the
+1.8 about box had it. Below that the version and runtime, a short note on what
+this rewrite changed, and the 1.8 credits kept as they were written: Bradley
+Uffner, artwork by Melanius, Krrios' UOSDK, DarkStorm on decoding `unifont.mul`,
+and the RunUO community.
+
+The original linked `gumpstudio.com` and — when clicked — opened
+`orbsydia.net`. Neither resolves any more, so neither is repeated: a dead link in
+an about box is worse than no link, and a test asserts that neither address has
+crept back in.
+
+### The icon
+
+Four sizes, from one. The executable shipped 32x32 alone, which Windows
+smooth-scales into mush wherever it wants something bigger, so 64, 128 and 256
+were added as **exact integer nearest-neighbour multiples** — every original
+pixel becomes a clean block, and nothing is invented that was not in the 32x32.
+The 32x32 payload itself is copied through untouched.
+
+Building that file caught a defect in the extraction: `GRPICONDIRENTRY` (14
+bytes, ending in a resource id) and `ICONDIRENTRY` (16, ending in a file offset)
+share only their first 12 bytes, and copying 12 *and then* rewriting the size
+field yields 20-byte entries and an icon every decoder rejects — while still
+writing a plausible-looking file. `ArtworkTests` now parses the shipped
+directory and checks that each entry's offset and length lie inside the file.
+
+### What the tests can and cannot see
+
+The assets are covered by reading the shipped bytes and parsing the JPEG and ICO
+headers, not by decoding them: `Avalonia.Headless` stubs drawing, so a decoded
+bitmap reports a 1x1 placeholder and a size assertion against it would pass
+whatever the file held.
+
+Nothing asserts what the artwork looks like, and the splash resists automation
+from outside as well — `PrintWindow` with `PW_RENDERFULLCONTENT` captures a
+borderless topmost Avalonia window as solid black, and a screen read races its
+two seconds. It was confirmed by eye instead, and the startup *sequence* was
+confirmed by polling the process's visible windows, which shows only the splash
+until it closes and only the editor afterwards.
 
 ---
 

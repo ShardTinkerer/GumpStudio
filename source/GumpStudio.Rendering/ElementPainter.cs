@@ -1,8 +1,6 @@
-using System.Globalization;
-using System.Text;
-
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Primitives;
+using GumpStudio.Uo.Data;
 
 using SkiaSharp;
 
@@ -300,88 +298,12 @@ internal sealed class ElementPainter(SKCanvas canvas, IGumpArtSource art, Render
     /// The text a localised area will actually show.
     /// </summary>
     /// <remarks>
-    /// Falls back to <c>#id</c> when no client is loaded or the id is not in the
-    /// cliloc table, which is what the editor showed for every localised area
-    /// before this: readable only to someone who had the id memorised.
+    /// The substitution rules live in <see cref="ClilocFormatter"/> rather than
+    /// here, because the properties editor previews the same string on hover and
+    /// the two must not be able to disagree.
     /// </remarks>
-    private string Localized(HtmlElement element)
-    {
-        if (art.GetCliloc(element.ClilocId) is not { } text)
-        {
-            return $"#{element.ClilocId}";
-        }
-
-        return element.Arguments.Length > 0
-            ? Substitute(text, element.Arguments)
-            : text;
-    }
-
-    /// <summary>
-    /// Fills a cliloc's <c>~1_THING~</c> placeholders from the argument list.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The client numbers them from one and separates the values with <c>@</c>,
-    /// running consecutive delimiters together. A placeholder with no argument is
-    /// left as it stands rather than blanked, so a missing value is visible
-    /// instead of silently disappearing.
-    /// </para>
-    /// <para>
-    /// An argument of the form <c>#1234</c> is itself a cliloc id — the
-    /// <c>xmfhtmltok</c> form uses that to nest one localised string inside
-    /// another — so it is resolved in turn, once, without recursing.
-    /// </para>
-    /// </remarks>
-    private string Substitute(string text, string arguments)
-    {
-        // Empty tokens are dropped, because the client runs consecutive
-        // delimiters together the way strtok does: `@@#1072325` names one
-        // argument, not an empty one followed by a real one.
-        string[] values = arguments.Split('@', StringSplitOptions.RemoveEmptyEntries);
-        StringBuilder built = new(text.Length);
-
-        for (int i = 0; i < text.Length; i++)
-        {
-            if (text[i] != '~')
-            {
-                built.Append(text[i]);
-
-                continue;
-            }
-
-            int close = text.IndexOf('~', i + 1);
-
-            if (close < 0)
-            {
-                built.Append(text[i..]);
-
-                break;
-            }
-
-            string placeholder = text[(i + 1)..close];
-            int underscore = placeholder.IndexOf('_', StringComparison.Ordinal);
-            string ordinal = underscore < 0 ? placeholder : placeholder[..underscore];
-
-            built.Append(
-                int.TryParse(ordinal, NumberStyles.Integer, CultureInfo.InvariantCulture, out int index)
-                && index >= 1
-                && index <= values.Length
-                    ? Value(values[index - 1])
-                    : text[i..(close + 1)]);
-
-            i = close;
-        }
-
-        return built.ToString();
-    }
-
-    /// <summary>One substitution value, resolving a nested cliloc reference.</summary>
-    private string Value(string argument) =>
-        argument.StartsWith('#')
-        && int.TryParse(
-            argument[1..], NumberStyles.Integer, CultureInfo.InvariantCulture, out int nested)
-            ? art.GetCliloc(nested) ?? argument
-            : argument;
+    private string Localized(HtmlElement element) =>
+        ClilocFormatter.Format(element.ClilocId, element.Arguments, art.GetCliloc);
 
     private void DrawArt(SKImage? image, Element element)
     {

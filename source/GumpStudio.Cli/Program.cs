@@ -84,7 +84,9 @@ internal static class Program
         Console.WriteLine($"Hues:          {context.Hues.Count}");
         Console.WriteLine($"Static tiles:  {context.TileData.StaticCount}"
             + $" ({(context.TileData.IsHighSeasFormat ? "High Seas" : "legacy")} tiledata)");
-        Console.WriteLine($"Cliloc strings:{context.Clilocs.Count,7}");
+        Console.WriteLine($"Cliloc strings:{context.Clilocs.Count,7}"
+            + $"  ({context.ClilocLanguage ?? "none"})");
+        Console.WriteLine($"Cliloc langs:  {string.Join(", ", context.ClilocLanguages)}");
         Console.WriteLine($"ASCII fonts:   {context.AsciiFonts.Count}");
         Console.WriteLine($"Unicode fonts: {context.UnicodeFonts.Count}");
 

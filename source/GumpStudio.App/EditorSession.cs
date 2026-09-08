@@ -7,6 +7,7 @@ using GumpStudio.Core.Serialization;
 using GumpStudio.Converters;
 using GumpStudio.Rendering;
 using GumpStudio.Uo;
+using GumpStudio.Uo.Data;
 
 namespace GumpStudio.App;
 
@@ -26,6 +27,9 @@ public sealed class EditorSession : IDisposable
     private GumpDocument _document = new();
     private int _activePageIndex;
     private long _savedStateId;
+
+    /// <summary>The in-flight cliloc read, shared by everything that wants it.</summary>
+    private Task? _clilocLoad;
 
     public EditorSession()
         : this(AppSettings.Load())
@@ -71,6 +75,100 @@ public sealed class EditorSession : IDisposable
 
     /// <summary>The loaded client, or null.</summary>
     public UoDataContext? Data => _data;
+
+    /// <summary>
+    /// The client's cliloc strings, or null until they have been read.
+    /// </summary>
+    /// <remarks>
+    /// Held here rather than reached through <see cref="Data"/> so that nothing
+    /// can touch the table by accident: reading it is a Burrows-Wheeler
+    /// decompress and around 124,000 strings, which is why opening a client
+    /// deliberately defers it.
+    /// </remarks>
+    public IReadOnlyList<ClilocEntry>? ClilocStrings { get; private set; }
+
+    /// <summary>Whether a cliloc lookup can answer without blocking.</summary>
+    public bool AreClilocsReady => ClilocStrings is not null;
+
+    /// <summary>The cliloc files the loaded client ships, as extension codes.</summary>
+    public IReadOnlyList<string> ClilocLanguages => _data?.ClilocLanguages ?? [];
+
+    /// <summary>The cliloc file currently being read, or null.</summary>
+    public string? ClilocLanguage => _data?.ClilocLanguage;
+
+    /// <summary>Raised when the cliloc strings, or the language, have changed.</summary>
+    public event EventHandler? ClilocsChanged;
+
+    /// <summary>
+    /// Reads the cliloc table off the UI thread, once.
+    /// </summary>
+    /// <remarks>
+    /// The same shape as <see cref="OpenClientAsync"/>: the reading happens on a
+    /// thread pool thread and the result is adopted back on the caller's
+    /// context, so nothing that listens has to think about threads. The task is
+    /// cached, so a panel filling itself and a tooltip opening at the same
+    /// moment share one parse instead of starting two.
+    /// </remarks>
+    public Task LoadClilocsAsync() => _clilocLoad ??= ReadClilocsAsync();
+
+    private async Task ReadClilocsAsync()
+    {
+        if (_data is not { } data)
+        {
+            return;
+        }
+
+        IReadOnlyList<ClilocEntry> read =
+            await Task.Run(() => data.Clilocs.Entries).ConfigureAwait(true);
+
+        // The client may have been swapped while this was reading, in which case
+        // these strings belong to a context nothing is looking at any more.
+        if (!ReferenceEquals(_data, data))
+        {
+            return;
+        }
+
+        ClilocStrings = read;
+
+        ClilocsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Switches cliloc language, remembers the choice and re-reads the table.
+    /// </summary>
+    /// <remarks>
+    /// Silently does nothing when the client ships no such file. The caller is
+    /// usually a list built from <see cref="ClilocLanguages"/>, but a remembered
+    /// setting can name a language the current installation lacks.
+    /// </remarks>
+    public async Task UseClilocLanguageAsync(string language)
+    {
+        ArgumentNullException.ThrowIfNull(language);
+
+        if (_data is not { } data || !data.UseClilocLanguage(language))
+        {
+            return;
+        }
+
+        Settings.ClilocLanguage = data.ClilocLanguage;
+        Settings.Save();
+
+        ClilocStrings = null;
+        _clilocLoad = null;
+
+        await LoadClilocsAsync().ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// One cliloc string, or null when it is unknown or not read yet.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately never starts the read. This is what a tooltip calls while
+    /// the pointer rests on a property row, and forcing 124,000 strings there
+    /// would freeze the pointer over the row.
+    /// </remarks>
+    public string? ResolveCliloc(int id) =>
+        AreClilocsReady ? _data?.Clilocs.GetText(id) : null;
 
     /// <summary>The converters the export menu offers.</summary>
     public static IReadOnlyList<IGumpConverter> Converters => GumpConverters.All;
@@ -174,6 +272,17 @@ public sealed class EditorSession : IDisposable
 
         _data = data;
         _art = new UoArtSource(data);
+
+        // Before anything can read the table. A remembered language the new
+        // installation does not ship is refused here and leaves its own choice
+        // standing, which is why this is not checked first.
+        if (Settings.ClilocLanguage is { } language)
+        {
+            data.UseClilocLanguage(language);
+        }
+
+        ClilocStrings = null;
+        _clilocLoad = null;
 
         DocumentChanged?.Invoke(this, EventArgs.Empty);
     }

@@ -260,6 +260,77 @@ public class UoDataContextTests
             $"{mangled} of {sampled} cliloc strings contain replacement characters.");
     }
 
+    /// <summary>
+    /// Every cliloc file the installation ships can actually be read.
+    /// </summary>
+    /// <remarks>
+    /// The synthetic fixtures cover language discovery and switching, but they
+    /// can only write the plain record stream. A retail client wraps every one
+    /// of these in the MegaCliloc codec, so this is the only place a non-English
+    /// wrapped file is decoded at all.
+    /// </remarks>
+    [Theory(SkipTestWithoutData = true)]
+    [MemberData(nameof(Clients))]
+    public void ReadsEveryClilocLanguageTheClientShips(string clientPath)
+    {
+        using UoDataContext context = UoDataContext.Open(clientPath);
+
+        Assert.Equal(context.HasClilocs, context.ClilocLanguages.Count > 0);
+
+        if (!context.HasClilocs)
+        {
+            return;
+        }
+
+        Assert.Contains(context.ClilocLanguage, context.ClilocLanguages);
+
+        List<string> broken = [];
+        List<bool> readable = [];
+
+        foreach (string language in context.ClilocLanguages)
+        {
+            Assert.True(context.UseClilocLanguage(language));
+            Assert.Equal(language, context.ClilocLanguage);
+
+            // No minimum count, and an empty table is allowed. A shipped
+            // translation is often partial - this matrix has a Cliloc.chs of
+            // 46 KB beside a Cliloc.enu of 5 MB - and one Cliloc.deu does not
+            // decompress at all, which the reader reports as no strings rather
+            // than as nonsense. What must never happen is being handed text
+            // that is not text: misread bytes produce U+FFFD in droves.
+            int sampled = 0;
+            int mangled = 0;
+
+            foreach (Data.ClilocEntry entry in context.Clilocs.Entries.Take(2000))
+            {
+                sampled++;
+
+                if (entry.Text.Contains('�'))
+                {
+                    mangled++;
+                }
+            }
+
+            readable.Add(context.Clilocs.Count > 10000);
+
+            if (mangled >= (sampled / 100) + 1)
+            {
+                broken.Add(
+                    $"cliloc.{language} ({context.Clilocs.Count} entries, "
+                    + $"{mangled}/{sampled} mangled)");
+            }
+        }
+
+        // Reported together: which languages fail says far more about the cause
+        // than the first one to trip an assertion does.
+        Assert.True(broken.Count == 0, $"Mangled: {string.Join("; ", broken)}");
+
+        // At least one of them has to hold strings. Without this, a reader that
+        // returned an empty table for every language would pass the loop above
+        // by having nothing to mangle.
+        Assert.Contains(true, readable);
+    }
+
     [Theory(SkipTestWithoutData = true)]
     [MemberData(nameof(Clients))]
     public void RendersAsciiText(string clientPath)
