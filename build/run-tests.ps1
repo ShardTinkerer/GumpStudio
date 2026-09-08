@@ -41,7 +41,6 @@ if ($projects.Count -eq 0) {
     throw "No test projects found under $testsRoot."
 }
 
-$suffix = $IsWindows ? '.exe' : $null
 $failed = @()
 
 foreach ($project in $projects | Sort-Object Name) {
@@ -58,7 +57,14 @@ foreach ($project in $projects | Sort-Object Name) {
         throw "Could not read TargetPath for $name. Restore the solution first."
     }
 
-    $exe = [IO.Path]::ChangeExtension($targetPath.Trim(), $suffix)
+    # Rebuilt from the parts rather than through ChangeExtension: binding $null
+    # to its [string] parameter makes PowerShell pass an empty string, which
+    # strips the ".dll" but leaves the dot, and the executable is extensionless
+    # everywhere except Windows.
+    $target = $targetPath.Trim()
+
+    $exe = Join-Path ([IO.Path]::GetDirectoryName($target)) (
+        [IO.Path]::GetFileNameWithoutExtension($target) + ($IsWindows ? '.exe' : ''))
 
     if (-not (Test-Path $exe)) {
         throw "Missing test executable '$exe'. Build the solution first."
