@@ -6,8 +6,11 @@ pwsh build/run-tests.ps1
 ```
 
 The same two lines are what CI runs, in the `test` job of both
-`.github/workflows/build-pr.yml` and `.github/workflows/build-and-release.yml`,
-on Windows and Ubuntu. `run-tests.ps1` asks MSBuild for each project's
+`.github/workflows/build.yml` and `.github/workflows/build-and-release.yml`, on
+Windows and Ubuntu. `build.yml` covers every pull request and every push to
+main, and compiles the NativeAOT binary for both runtimes; `build-and-release.yml`
+runs only for a version tag, and is the only thing that publishes. A change
+confined to documentation skips both. `run-tests.ps1` asks MSBuild for each project's
 `TargetPath` rather than assembling a path from a convention, so it follows
 `UseArtifactsOutput` and a target-framework bump without being told. It does
 need the solution restored first, since reading a property evaluates the

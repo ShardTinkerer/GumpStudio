@@ -1,10 +1,34 @@
-name: Build (PR)
+name: Build
 
-# Any target branch, not just main: work that lands through a staging branch
-# deserves the same gate as a pull request straight into main.
+# Every pull request and every push to main. Any target branch, not just main:
+# work that lands through a staging branch deserves the same gate as a pull
+# request straight into main.
+#
+# paths-ignore covers documentation and repository hygiene only. Notably absent:
+# .editorconfig, which promotes a dozen analysers to errors and can therefore
+# break the build on its own; .github/workflows, because a workflow change is
+# exactly the thing that needs proving; and tests, because they are what this
+# runs.
+#
+# The list is written out twice because GitHub's workflow parser does not
+# support YAML anchors; keep the two copies in step.
 on:
   pull_request:
     branches: ["**"]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".gitattributes"
   workflow_dispatch:
 
 permissions:
@@ -79,12 +103,25 @@ jobs:
           path: ./artifacts/test-results
 
   aot:
-    name: AOT publish (win-x64)
+    name: AOT publish (${{ matrix.rid }})
 
     # Not a packaging job — nothing is archived or kept. It exists so that a
     # dependency which starts emitting trim warnings fails in review rather
     # than at release time, which is exactly how the Dock upgrade behaved.
-    runs-on: windows-latest
+    #
+    # Both runtimes, because the release workflow no longer builds on a push to
+    # main: without this, nothing would compile the Linux binary until the tag
+    # that publishes it. NativeAOT cannot cross-compile, hence one runner each.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v7
@@ -101,6 +138,12 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
           restore-keys: nuget-${{ runner.os }}-
 
+      # ILC links through clang and needs zlib's headers. Installing them
+      # explicitly rather than trusting whatever the runner image ships.
+      - name: Install the native toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
+
       - name: Publish
         shell: pwsh
-        run: ./build/publish-aot.ps1 -Runtime win-x64
+        run: ./build/publish-aot.ps1 -Runtime ${{ matrix.rid }}
