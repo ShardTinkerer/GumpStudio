@@ -175,13 +175,20 @@ public sealed partial class ClilocPanel : UserControl
         // Recycling off. A recycled presenter hands back the existing child and
         // only swaps its DataContext, which would leave the literal text of the
         // row it was built for.
+        //
+        // Which is also why the values are assigned rather than bound. With no
+        // recycling each row is built for one entry and never sees another, so a
+        // binding buys nothing here — and `new Binding("Id")` is a reflection
+        // binding, which is RequiresUnreferencedCode and RequiresDynamicCode and
+        // so fails the NativeAOT publish outright.
         new(
-            static (_, _) =>
+            static (entry, _) =>
             {
                 Grid row = new() { ColumnDefinitions = new ColumnDefinitions(RowColumns) };
 
                 TextBlock id = new()
                 {
+                    Text = entry.Id.ToString(CultureInfo.InvariantCulture),
                     Foreground = Brushes.Gray,
                     HorizontalAlignment = HorizontalAlignment.Right,
                     Margin = new Avalonia.Thickness(0, 0, 8, 0),
@@ -192,15 +199,13 @@ public sealed partial class ClilocPanel : UserControl
                 // makes the scrollbar jump as it scrolls.
                 TextBlock text = new()
                 {
+                    Text = entry.Text,
                     Foreground = Brushes.Silver,
                     TextTrimming = TextTrimming.CharacterEllipsis,
                 };
 
-                id.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ClilocEntry.Id)));
-                text.Bind(TextBlock.TextProperty, new Avalonia.Data.Binding(nameof(ClilocEntry.Text)));
-
                 // The row trims, so the full string has to be reachable.
-                text.Bind(ToolTip.TipProperty, new Avalonia.Data.Binding(nameof(ClilocEntry.Text)));
+                ToolTip.SetTip(text, entry.Text);
 
                 Grid.SetColumn(id, 0);
                 Grid.SetColumn(text, 1);
