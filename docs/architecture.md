@@ -177,6 +177,22 @@ three places or it went missing from one of the builds.
 The converters are ordinary referenced code now, so an AOT publish and an ordinary
 build run the same path, and adding one means adding it to a single list.
 
+## Two workflows, split by what they can do
+
+`build.yml` runs on every pull request and every push to main: it tests both
+platforms and AOT-compiles both runtimes, and keeps nothing. `build-and-release.yml`
+runs only for a version tag, and is the only thing that can publish. Nothing but
+a tag reaches the release path.
+
+The split is what lets documentation skip CI safely. The `paths-ignore` list
+lives on `build.yml`'s branch triggers alone, because GitHub does not define how
+path filters behave for a tag push — a tag names a commit rather than a diff —
+and a filter that silently skipped a release would be worse than one that never
+skips anything. `.editorconfig`, `.github/workflows` and `tests/` are excluded
+from that list on purpose: the first promotes analysers to errors and can break
+the build by itself, the second is what needs proving when it changes, and the
+third is what CI runs.
+
 ## Known gaps and standing risks
 
 Things a reader should know before changing the relevant code, rather than a
