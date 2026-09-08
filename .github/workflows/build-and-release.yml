@@ -64,7 +64,7 @@ jobs:
       - name: Test
         shell: pwsh
         run: >
-          ./eng/run-tests.ps1
+          ./build/run-tests.ps1
           -Configuration Release
           -ResultsDirectory ./artifacts/test-results
           -Coverage
@@ -129,16 +129,20 @@ jobs:
       - name: Publish
         shell: pwsh
         run: >
-          ./eng/publish-aot.ps1
+          ./build/publish-aot.ps1
           -Runtime ${{ matrix.rid }}
           -Version "${env:ReleaseVersion}"
           -Output "artifacts/stage/${env:ArchiveName}"
 
+      # Unguarded on purpose. This step used to be `if (Test-Path LICENSE)`,
+      # which was always false, so every release published so far shipped
+      # without a licence and nothing said so. A missing one now fails here.
       - name: Add the documentation
         shell: pwsh
         run: |
           Copy-Item README.md "artifacts/stage/${env:ArchiveName}"
-          if (Test-Path LICENSE) { Copy-Item LICENSE "artifacts/stage/${env:ArchiveName}" }
+          Copy-Item LICENSE "artifacts/stage/${env:ArchiveName}"
+          Copy-Item THIRD-PARTY-NOTICES.md "artifacts/stage/${env:ArchiveName}"
 
       # Windows gets a zip and Linux a tarball, because a zip has nowhere to
       # record the executable bit and the native binary arrives unrunnable.

@@ -62,12 +62,11 @@ jobs:
       #
       # The test projects are launched directly rather than through `dotnet
       # test`, which reports "Zero tests ran" on SDK 10.0.400. See
-      # docs/testing.md. run-tests.ps1 reads bin/Release/net10.0, so the build
-      # step above must stay on the default output path.
+      # docs/testing.md.
       - name: Test
         shell: pwsh
         run: >
-          ./eng/run-tests.ps1
+          ./build/run-tests.ps1
           -Configuration Release
           -ResultsDirectory ./artifacts/test-results
           -Coverage
@@ -104,4 +103,4 @@ jobs:
 
       - name: Publish
         shell: pwsh
-        run: ./eng/publish-aot.ps1 -Runtime win-x64
+        run: ./build/publish-aot.ps1 -Runtime win-x64

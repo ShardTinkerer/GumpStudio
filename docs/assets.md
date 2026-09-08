@@ -6,8 +6,14 @@ this repository's source, so how they were obtained is written down here.
 
 | File | Origin |
 |---|---|
-| `splash.jpg` | `$this.BackgroundImage` in `src/GumpStudioCore/Forms/SplashForm.resx` |
-| `gumpstudio.ico` | the icon resource on `external/Gumpstudio1.8r3/GumpStudio.exe` |
+| `splash.jpg` | `$this.BackgroundImage` in `GumpStudioCore/Forms/SplashForm.resx` |
+| `gumpstudio.ico` | the icon resource on `Gumpstudio1.8r3/GumpStudio.exe` |
+
+Neither origin is in this repository, and the paths above are relative to where
+each one is. The decompiled port those `.resx` files belong to is preserved on
+the **`main` branch**, under `src/`. The three shipped 1.8 builds are binaries
+that are not redistributable, so they are kept **outside** the working tree; the
+name `external/` is in `.gitignore` so a local copy can never be committed.
 
 The original's own about text credits the artwork to **Melanius**; the editor it
 belongs to was written by **Bradley Uffner**. `AboutWindow` repeats those credits
@@ -31,7 +37,7 @@ involved, which matters because `BannedSymbols.txt` forbids it:
 ```python
 import base64, re, xml.etree.ElementTree as ET
 
-data = ET.parse("src/GumpStudioCore/Forms/SplashForm.resx").getroot()
+data = ET.parse("GumpStudioCore/Forms/SplashForm.resx").getroot()
 blob = data.find('data[@name="$this.BackgroundImage"]/value').text
 open("splash.jpg", "wb").write(base64.b64decode(re.sub(r"\s+", "", blob)))
 ```
@@ -51,7 +57,7 @@ happen to be the same byte length:
 - `$this.Icon` in `AboutBoxForm.resx` — a document sheet with a folded corner, a
   red `GUMP` label and four rectangles. It reads as a file type. Not used.
 
-All three builds in `external/` carry the same executable icon: one 32x32 image,
+All three 1.8 builds carry the same executable icon: one 32x32 image,
 256 colours, 2,216 bytes.
 
 `gumpstudio.ico` holds four entries:
@@ -106,4 +112,4 @@ same file as the window icon.
 than decoding through `Bitmap`. The headless platform stubs drawing, so a decoded
 bitmap reports a 1x1 placeholder and any size assertion against it would pass
 whatever the asset contained. Nothing asserts what the images *look like* — that
-is a job for eyes, and the checklist is in `docs/status.md`.
+is a job for eyes.

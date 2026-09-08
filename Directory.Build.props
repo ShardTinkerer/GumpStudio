@@ -7,6 +7,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
 
+    <!-- One output root for the whole repository, rather than bin/obj beside
+         every project. Both properties are set explicitly: the default location
+         is derived from whichever Directory.Build.props MSBuild resolved, and
+         being unambiguous here is what lets the scripts and CI name one path. -->
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>

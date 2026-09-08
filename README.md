@@ -5,27 +5,13 @@ in 2004.
 
 This repository holds a rewrite on **.NET 10** with an **Avalonia** UI, running
 on Windows, Linux and macOS. It reads both classic `.mul` and modern `.uop`
-client data, so it works with clients from 2001 through to current.
+client data, so it works with clients from 2001 through to current. You can
+place elements, edit their properties, save, import a gump captured off the
+wire, and export raw client layout, POL, RunUO and Sphere.
 
-> **Status: alpha.** The editor is usable — you can place elements, edit their
-> properties, save, import a gump captured off the wire, and export raw client
-> layout, POL, RunUO and Sphere — but several conveniences from the old
-> application are not built yet. See
-> [docs/status.md](docs/status.md) for exactly what is and is not done.
-
-## Why a rewrite
-
-The original VB.NET source was lost. A previous effort decompiled the shipped
-binary and converted it to C#; that port lives in `src/` and is kept as a
-reference. It could not move forward:
-
-- The `.gump` file format, the plugin configuration, the art caches and even
-  copy/paste all went through `BinaryFormatter`, which is removed from .NET 9+.
-- Every piece of behaviour lived in one 1988-line `DesignerForm`, with no
-  document model to test or reuse.
-- Its Ultima SDK fork was from around 2008 and had no `.uop` support, so it could
-  not read any client newer than roughly 7.0.24. Modern clients ship no
-  `gumpart.mul` at all.
+> **Status: alpha.** Usable, but several conveniences from the old application
+> are not built yet. [docs/architecture.md](docs/architecture.md) lists the
+> known gaps.
 
 ## Building
 
@@ -33,7 +19,17 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```sh
 dotnet build GumpStudio.slnx
-dotnet test  GumpStudio.slnx
+pwsh build/run-tests.ps1
+```
+
+`dotnet test` reports "Zero tests ran" on SDK 10.0.400, which is a toolchain
+defect rather than anything about this repository. `build/run-tests.ps1`
+launches the test applications directly instead — see
+[docs/testing.md](docs/testing.md).
+
+## Running
+
+```sh
 dotnet run --project source/GumpStudio.App
 ```
 
@@ -41,99 +37,60 @@ On first run the application asks for your Ultima Online folder and remembers
 it. Any client from 2001 onward should work; it tells you what is missing if a
 folder is not usable.
 
-## Headless tooling
+There is also a headless CLI for the same data layer — inspecting a client,
+writing art to PNG, rendering a saved document, and running the four export
+converters without the UI:
 
 ```sh
-# What does this client contain?
-gumpstudio info --client "C:/path/to/UO"
-
-# Write a gump, an item or a land tile to PNG
-gumpstudio dump --client "C:/path/to/UO" --gump 5 --out gump5.png
-gumpstudio dump --client "C:/path/to/UO" --item 0x0E75 --hue 33 --out pack.png
-
-# Render a saved document with real client art
-gumpstudio render --client "C:/path/to/UO" --in mygump.gump --out mygump.png
-
-# Export a server script
-gumpstudio export --in mygump.gump --name MyGump --format pol
-gumpstudio export --in mygump.gump --name MyGump --format runuo --out MyGump.cs
-gumpstudio export --in mygump.gump --name d_shop --format sphere --dialect 056 --out d_shop.scp
-
-# The client's own layout text, belonging to no particular server
-gumpstudio export --in mygump.gump --format layout
-
-# Read a gump captured off the wire back into a document
-gumpstudio import --in captured.txt --out captured.gump
-sniffer | gumpstudio import --out captured.gump
+dotnet run --project source/GumpStudio.Cli -- info --client "C:/path/to/UO"
 ```
 
-Four formats are available, each with its dialects:
-
-| Format | Dialects |
-|---|---|
-| `layout` | — the client's own layout text, with no server wrapper |
-| `pol` | `gump-package` (default), `layout-strings` |
-| `runuo` | `named` (default), `numeric` |
-| `sphere` | `056` (default), `099` |
-
-The ids earlier releases used still work: `pol-layout`, `runuo-numeric`,
-`sphere-056` and `sphere-099` select the same converter and dialect as before.
-Run `gumpstudio` with no arguments for the list.
+Run it with no arguments for the full usage, including the export formats and
+their dialects.
 
 ## Releases
 
-Published on the [releases page](https://github.com/AsYlum-/GumpStudio/releases)
-as one archive per platform — `GumpStudio-<version>-win-x64.zip` and
-`GumpStudio-<version>-linux-x64.tar.gz`. Each holds the editor and the
-`gumpstudio` CLI as NativeAOT binaries: unpack and run, with no .NET runtime to
-install. Linux ships a tarball rather than a zip because a zip cannot carry the
-executable bit.
+Published on the [releases page](https://github.com/ShardTinkerer/GumpStudio/releases)
+as one archive per platform. Each holds the editor and the `gumpstudio` CLI as
+NativeAOT binaries: unpack and run, with no .NET runtime to install.
 
 A release is cut by pushing a version tag — `2.0.0-alpha.1`, `2.1.0`, no `v`
 prefix. The tag is the version: it is stamped into the binaries and names the
-archives. A tag with a `-` in it is published as a prerelease. Pushes to `main`
-run the same build and keep the archives as CI artifacts without publishing
-anything.
+archives, and a tag containing `-` publishes as a prerelease.
 
-## Building a release
+To build one locally:
 
 ```sh
-# Self-contained
-dotnet publish source/GumpStudio.App -c Release -r win-x64 --self-contained
-
-# Both binaries as single native files, no runtime to install
-pwsh eng/publish-aot.ps1 -Runtime win-x64
+pwsh build/publish-aot.ps1 -Runtime win-x64
 ```
 
-Both builds contain the same four converters, compiled in. NativeAOT compiles
-for the machine it runs on and cannot cross-compile, so each platform is built
-on its own. It needs a native toolchain: on Windows the MSVC "Desktop
-development with C++" workload, elsewhere clang and zlib's headers.
+NativeAOT cannot cross-compile, so each platform is built on its own machine and
+needs a native toolchain: on Windows the MSVC "Desktop development with C++"
+workload, elsewhere clang and zlib's headers.
 
 ## Repository layout
 
 ```
 source/          the rewrite
 tests/           tests, including a matrix run against real clients
-src/             the legacy net48 port — reference only
-external/        original 1.8 binaries, used as a behaviour reference
-docs/            architecture, status, file formats, testing
+build/           the scripts CI runs — tests and NativeAOT publishing
+docs/            architecture, testing, file format, assets
+artifacts/       every build's output, and the only directory a build writes
 ```
+
+`artifacts/` is the .NET SDK's `UseArtifactsOutput` root, set in
+`Directory.Build.props`. There is no `bin` or `obj` beside a project, so
+deleting that one directory cleans the repository completely.
 
 ## Documentation
 
 | Document | What it covers |
 |---|---|
-| [docs/status.md](docs/status.md) | What is finished, what is not, and the known gaps |
-| [docs/architecture.md](docs/architecture.md) | Project layout and the reasoning behind it |
-| [docs/uo-file-formats.md](docs/uo-file-formats.md) | Verified notes on the client data formats |
+| [docs/architecture.md](docs/architecture.md) | The six projects, the reasoning behind them, and the known gaps |
+| [docs/gump-commands.md](docs/gump-commands.md) | The client's layout commands and how the editor models each one |
 | [docs/testing.md](docs/testing.md) | Running the tests, including against real clients |
-
-The file-format notes are worth a look even if you are not working on this
-project: they document the Burrows-Wheeler stage modern `.uop` gump art uses,
-and the fact that the MegaCliloc wrapper is the same transform. Both were
-verified against retail clients rather than taken from existing documentation,
-which turned out to describe a different client build.
+| [docs/legacy-gump-format.md](docs/legacy-gump-format.md) | How 1.8 saved `.gump` and `.gumpling`, and how they are read now |
+| [docs/assets.md](docs/assets.md) | The 1.8 artwork, and how it was recovered |
 
 ## Credits
 
@@ -150,3 +107,12 @@ Sweetman's, itself based on Daegon / Eric Brown's.
 The `.uop` container and its Burrows-Wheeler stage were understood with
 reference to the [ClassicUO](https://github.com/ClassicUO/ClassicUO) project
 (BSD-2-Clause).
+
+## Licence
+
+MIT, in [LICENSE](LICENSE). It covers this rewrite: the 2004 original carried no
+stated licence and its source is lost, so nothing here can be a grant on its
+author's behalf. The two recovered artwork assets, the ClassicUO notice and the
+exporters' lineage are recorded in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which ships in every release
+archive.

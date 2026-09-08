@@ -1,22 +1,26 @@
 # GumpStudio rewrite — documentation
 
-The rewrite targets **.NET 10** with an **Avalonia** cross-platform UI, replacing
-the decompiled .NET Framework 4.8 WinForms port that lives in `src/`.
+The rewrite targets **.NET 10** with an **Avalonia** cross-platform UI. It
+replaces the decompiled .NET Framework 4.8 WinForms port, which is preserved on
+the `main` branch.
 
 | Document | What it covers |
 |---|---|
-| [status.md](status.md) | What is finished, what is next, and the known gaps |
-| [architecture.md](architecture.md) | Project layout and the reasoning behind it |
-| [uo-file-formats.md](uo-file-formats.md) | Verified notes on the client data formats |
+| [architecture.md](architecture.md) | The six projects, the reasoning behind them, and the known gaps |
+| [gump-commands.md](gump-commands.md) | The client's layout commands and how the editor models each one |
 | [testing.md](testing.md) | Running the tests, including against real UO clients |
+| [legacy-gump-format.md](legacy-gump-format.md) | How 1.8 saved `.gump` and `.gumpling`, and how they are read now |
 | [assets.md](assets.md) | The 1.8 artwork, and how it was recovered |
 
 ## Quick start
 
 ```sh
 dotnet build GumpStudio.slnx
-dotnet test  GumpStudio.slnx
+pwsh build/run-tests.ps1
 ```
+
+`dotnet test` is not the way in: it reports "Zero tests ran" on SDK 10.0.400.
+[testing.md](testing.md) explains why and what to retry after an SDK bump.
 
 Point the headless tool at a UO installation to check the data layer end to end:
 
@@ -25,27 +29,20 @@ dotnet run --project source/GumpStudio.Cli -- info --client "C:/path/to/UO"
 dotnet run --project source/GumpStudio.Cli -- dump --client "C:/path/to/UO" --gump 5 --out gump5.png
 ```
 
-## Publishing
-
-```sh
-dotnet publish source/GumpStudio.App -c Release -r win-x64   --self-contained
-dotnet publish source/GumpStudio.App -c Release -r linux-x64 --self-contained
-dotnet publish source/GumpStudio.App -c Release -r osx-arm64 --self-contained
-```
-
-The four export converters are compiled in, so a published build has everything
-it needs beside the executable and the NativeAOT image behaves identically.
-
 ## Repository layout
 
 ```
 source/          the rewrite
 tests/           test projects, including the real-client matrix
-src/             the legacy net48 port — reference only, deleted at the end
-external/        original 1.8 binaries, used as a behaviour reference (untracked)
+build/           the scripts CI runs — tests and NativeAOT publishing
 docs/            this directory
+artifacts/       every build's output, and the only directory a build writes
 ```
 
-`src/` is shielded from the root build configuration by an empty
-`src/Directory.Build.props`, so the two trees can coexist until the rewrite
-reaches parity.
+Output is centralised by `UseArtifactsOutput` in the root
+`Directory.Build.props`: no project has a `bin` or `obj` beside it, so
+`artifacts/` is the whole of what a build leaves behind.
+
+The 2004 binaries the rewrite was checked against are **not** in the
+repository — they are not redistributable, and `external/` is in `.gitignore` so
+that a local copy under that name can never be committed.

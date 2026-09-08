@@ -2,14 +2,16 @@
 
 ```sh
 dotnet build GumpStudio.slnx
-pwsh eng/run-tests.ps1
+pwsh build/run-tests.ps1
 ```
 
 The same two lines are what CI runs, in the `test` job of both
 `.github/workflows/build-pr.yml` and `.github/workflows/build-and-release.yml`,
-on Windows and Ubuntu. `run-tests.ps1` looks for the executables under
-`bin/<configuration>/net10.0`, so a build that redirects its output leaves the
-script with nothing to launch.
+on Windows and Ubuntu. `run-tests.ps1` asks MSBuild for each project's
+`TargetPath` rather than assembling a path from a convention, so it follows
+`UseArtifactsOutput` and a target-framework bump without being told. It does
+need the solution restored first, since reading a property evaluates the
+project.
 
 Tests run on **Microsoft.Testing Platform** (xunit.v3). .NET 10 removed the
 VSTest bridge, so the opt-in lives in `global.json`:
@@ -20,7 +22,7 @@ VSTest bridge, so the opt-in lives in `global.json`:
 
 ## Why not `dotnet test`
 
-MTP test projects are self-executing applications, and `eng/run-tests.ps1`
+MTP test projects are self-executing applications, and `build/run-tests.ps1`
 launches each one directly. That is a workaround, not a style choice:
 
 > On SDK **10.0.400**, `dotnet test` reports `Zero tests ran` (exit code 5) for
@@ -53,7 +55,7 @@ has them. Tests that need one are **skipped, not failed**.
 $env:GUMPSTUDIO_TEST_CLIENT     = "C:\...\Ultima Online Mondain's Legacy"
 $env:GUMPSTUDIO_TEST_CLIENT_UOP = "C:\...\Ultima Online Classic"
 $env:GUMPSTUDIO_TEST_CLIENT_ROOT= "F:\UOClients"
-pwsh eng/run-tests.ps1
+pwsh build/run-tests.ps1
 ```
 
 A variable pointing at a nonexistent directory throws rather than silently

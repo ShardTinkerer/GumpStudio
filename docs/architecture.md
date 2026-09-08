@@ -115,9 +115,9 @@ loops, three radio-group trackers, three text-slot allocators, and three element
 client's layout grammar hand-written **four** times, because the two dialects that
 do not emit it still build it for the notes they leave beside commands they
 cannot express. The same defects then had to be found and fixed once per
-exporter; `status.md` records the nested-group coordinate bug, the
-locale-sensitive number formatting and the cross-page radio-group leak each being
-repaired three times.
+exporter: the nested-group coordinate bug, the locale-sensitive number
+formatting and the cross-page radio-group leak were each repaired three times
+over.
 
 `GumpLayoutBuilder` is the second real implementation of `IElementVisitor`, so a
 new element type is now a compile error in every converter rather than a gump
@@ -176,3 +176,59 @@ three places or it went missing from one of the builds.
 
 The converters are ordinary referenced code now, so an AOT publish and an ordinary
 build run the same path, and adding one means adding it to a single list.
+
+## Known gaps and standing risks
+
+Things a reader should know before changing the relevant code, rather than a
+to-do list.
+
+- **The SkiaSharp version skew — check this first if rendering breaks after an
+  Avalonia bump.** `Avalonia.Skia` 12.1.2 is built against SkiaSharp **3.119.4**;
+  this repository pins **4.151.2** and central transitive pinning unifies to it.
+  Nothing breaks today precisely *because* the application never hands a Skia
+  object to Avalonia — the canvas blits through a `WriteableBitmap`, and that is
+  what insulates the two. It is also what blocks the obvious optimisation:
+  drawing into Avalonia's own canvas through `ISkiaSharpApiLease` would remove
+  the CPU raster and the 3 MB per-frame texture upload, but taking an `SKCanvas`
+  across that boundary means matching Avalonia's SkiaSharp major version.
+- **`BwtDecoder` mis-decompresses at least one real file.** The reference
+  client's `Cliloc.deu` comes back as nonsense, so that language reports no
+  strings; the other seven in the same client are fine. `ClilocTable.Parse`
+  returns an empty table rather than garbage when neither reading looks like
+  text, because a caller can render `#1044017` for a string it does not have but
+  cannot tell that a string it was handed is wrong.
+- **The BWT decoder is only covered by real-client tests**, so CI never
+  exercises it. Closing that needs either a BWT *encoder* written purely for
+  fixtures, or a small captured byte pair checked in.
+- **Resolving a UOP gump's dimensions requires decoding it**, because the size
+  lives inside the compressed payload. An art browser must therefore virtualise
+  and resolve lazily rather than measuring everything up front. The payload memo
+  is a 32 MB least-recently-used window, so a revisited entry is not inflated
+  twice, but the first look at one still costs a decode.
+- **`dotnet test` does not work on SDK 10.0.400** — `Zero tests ran` for every
+  project, reproducibly, including for a one-file xunit.v3 project in an empty
+  directory. `build/run-tests.ps1` launches the test applications directly
+  instead. See [testing.md](testing.md), and retry `dotnet test` after an SDK
+  bump.
+- **Two client eras are unsupported.** Pre-2002 cliloc is numbered
+  `clilocNN.enu` chunks in an IFF `FORM`/`DATA` container; the 1996 pre-alpha
+  ships `GUMPS.MUL` with no index. `UoDataContext.Validate` reports what is
+  missing in both cases, and a test asserts it does. Everything else in a
+  pre-2002 client reads fine.
+- **Reflection is not available.** Both applications publish NativeAOT, so
+  string bindings (`new Binding("Id")`), reflective serialisers and anything
+  needing `RequiresDynamicCode` fail the publish rather than warning. Dock's own
+  layout serialiser was declined for this reason, which is why tearing a panel
+  into its own window is not remembered between sessions even though pane sizes
+  and hidden panels are.
+- **The shell is imperative.** `MainWindow.axaml.cs` has no view models, and
+  every action is registered three times over — menu, shortcut, context menu.
+  Avalonia's `Click`/`ClickAsync` also bind silently to nothing on a misspelled
+  control name, so a typo yields a dead menu item with no error anywhere.
+- **Smaller known limitations.** Art-gallery rows are built without recycling,
+  so roughly forty controls are allocated per row scrolled into view; the canvas
+  rasterises its whole surface rather than clipping to the scroll viewport;
+  `UoArtSource` has no tests of its own because it takes a concrete
+  `UoDataContext`; a page cannot be renamed, though `GumpPage.Name` is shown in
+  the move-to-page menu; and the splash graphic is a 2004 JPEG, so it carries
+  compression artefacts around the lettering that only new artwork could remove.

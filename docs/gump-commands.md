@@ -126,7 +126,7 @@ silently fell into group 0.
 
 `LayoutStringParser` understands every command in the table above, which is what
 makes importing a gump captured off the wire possible — see
-[status.md](status.md#phase-8--importing-a-gump-captured-off-the-wire-). The
+[architecture.md](architecture.md#import-the-same-pipeline-backwards). The
 mapping runs in both directions, so a command this page lists is one the editor
 can both write and read.
 
