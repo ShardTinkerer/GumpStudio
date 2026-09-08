@@ -1,12 +1,15 @@
 name: Build & Release
 
-# Pushes to main build and archive but publish nothing. A version tag does the
-# same work and then attaches the archives to a GitHub release, so the tag is
-# the only thing that decides what the world sees. Two globs because the second
-# is what matches a prerelease such as 2.0.0-alpha.1.
+# A version tag, and nothing else. Two globs because the second is what matches
+# a prerelease such as 2.0.0-alpha.1.
+#
+# Deliberately no branch trigger and no paths-ignore. GitHub does not define how
+# path filters behave for a tag push — a tag names a commit rather than a diff —
+# and a filter that silently skips the release is the worst failure this file
+# could have. Ordinary validation, including an AOT compile of both runtimes,
+# lives in build.yml, which runs on every push to main.
 on:
   push:
-    branches: [main]
     tags:
       - "[0-9]+.[0-9]+.[0-9]+"
       - "[0-9]+.[0-9]+.[0-9]+-*"
@@ -59,7 +62,7 @@ jobs:
       - name: Build
         run: dotnet build GumpStudio.slnx --configuration Release --no-restore
 
-      # See build-pr.yml for why the tests are launched directly and why the
+      # See build.yml for why the tests are launched directly and why the
       # client-data variables are left unset.
       - name: Test
         shell: pwsh
@@ -114,9 +117,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang zlib1g-dev
 
-      # A tag names itself. Anything else is a main build, which is stamped with
-      # the repository's own version rather than a branch name that Version
-      # cannot hold.
+      # A tag names itself. The only other way in is workflow_dispatch, which
+      # is stamped with the repository's own version rather than a branch name
+      # that Version cannot hold.
       - name: Work out the version
         shell: pwsh
         run: |
