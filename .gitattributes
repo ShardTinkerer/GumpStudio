@@ -1,0 +1,22 @@
+# Normalise on commit, check out LF everywhere. This repository compares
+# exporter output byte-for-byte and runs the same tests on Windows and Linux,
+# so line endings are not a per-clone detail.
+* text=auto eol=lf
+
+# The byte-sensitive fixtures, pinned explicitly rather than left to text=auto's
+# content sniffing. GoldenTests normalises before comparing, but nothing
+# guarantees the next fixture added here gets the same courtesy.
+tests/GumpStudio.Converters.Tests/Goldens/*.golden.txt text eol=lf
+tests/GumpStudio.Core.Tests/Captures/*.txt            text eol=lf
+
+# Never touched. splash.jpg and gumpstudio.ico are recovered 2004 artwork kept
+# byte-for-byte (docs/assets.md), and the client data formats are binary.
+*.jpg   binary
+*.jpeg  binary
+*.png   binary
+*.bmp   binary
+*.ico   binary
+*.gump  binary
+*.mul   binary
+*.uop   binary
+*.idx   binary

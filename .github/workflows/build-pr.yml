@@ -1,0 +1,106 @@
+name: Build (PR)
+
+# Any target branch, not just main: work that lands through a staging branch
+# deserves the same gate as a pull request straight into main.
+on:
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CI: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      # setup-dotnet's own cache wants a lock file, which central package
+      # management here does not produce. The versions all live in one file, so
+      # that file is the key.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore GumpStudio.slnx
+
+      - name: Build
+        run: dotnet build GumpStudio.slnx --configuration Release --no-restore
+
+      # Tests needing real UO client data read GUMPSTUDIO_TEST_CLIENT and skip
+      # when it is unset, which is always the case on CI. Everything else runs
+      # against checked-in synthetic fixtures. Never set those variables to a
+      # placeholder: a path that does not exist throws rather than skipping.
+      #
+      # The test projects are launched directly rather than through `dotnet
+      # test`, which reports "Zero tests ran" on SDK 10.0.400. See
+      # docs/testing.md.
+      - name: Test
+        shell: pwsh
+        run: >
+          ./build/run-tests.ps1
+          -Configuration Release
+          -ResultsDirectory ./artifacts/test-results
+          -Coverage
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: ./artifacts/test-results
+
+  aot:
+    name: AOT publish (win-x64)
+
+    # Not a packaging job — nothing is archived or kept. It exists so that a
+    # dependency which starts emitting trim warnings fails in review rather
+    # than at release time, which is exactly how the Dock upgrade behaved.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Publish
+        shell: pwsh
+        run: ./build/publish-aot.ps1 -Runtime win-x64

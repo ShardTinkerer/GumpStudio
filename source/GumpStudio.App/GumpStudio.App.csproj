@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Description>Avalonia desktop shell for GumpStudio.</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Views are XAML; the generated partials do not carry doc comments. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!--
+      The 1.8 icon, so the executable and the taskbar look like the application
+      they continue rather than like a generic .NET window.
+    -->
+    <ApplicationIcon>Assets\gumpstudio.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+      Artwork recovered from the 1.8 build. The splash graphic is the JPEG that
+      was embedded in both SplashForm and AboutBoxForm, byte for byte; the icon
+      is the one on GumpStudio.exe, its 32x32 original kept verbatim and larger
+      sizes added by exact nearest-neighbour multiples. See docs/assets.md.
+  -->
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Simple" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Dock.Avalonia" />
+    <PackageReference Include="Dock.Model.Avalonia" />
+    <PackageReference Include="Dock.Avalonia.Themes.Simple" />
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+  </ItemGroup>
+
+  <!--
+    The shell has internal helpers worth testing directly - the Skia-to-Avalonia
+    pixel copy in particular, whose alpha handling is easy to get wrong and
+    invisible until art with soft edges is drawn.
+  -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>GumpStudio.App.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GumpStudio.Core/GumpStudio.Core.csproj" />
+    <ProjectReference Include="../GumpStudio.Rendering/GumpStudio.Rendering.csproj" />
+    <ProjectReference Include="../GumpStudio.Converters/GumpStudio.Converters.csproj" />
+  </ItemGroup>
+
+  <!--
+    Nothing here needs an AOT accommodation of its own: the converters are
+    ordinary referenced code, so a NativeAOT publish and an ordinary build run
+    the same path. They used to be assemblies discovered from a Plugins folder,
+    which an AOT image cannot load at all — hence a second registration route
+    behind #if STATIC_PLUGINS, and two MSBuild copy targets to deploy them.
+
+    The trim warnings Dock brings in are suppressed for every AOT publish in
+    Directory.Build.props, alongside the ones from System.Formats.Nrbf.
+  -->
+
+</Project>

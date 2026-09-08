@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="GumpStudio.App.Controls.ClilocPanel">
+
+  <DockPanel>
+
+    <!--
+      One docked row of chrome. The panel is short and wide, so a second row
+      would cost a quarter of the strings it can show at once.
+    -->
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto" Margin="6,6,6,4">
+
+      <TextBox Grid.Column="0" Name="FilterBox" PlaceholderText="text or cliloc id" />
+
+      <ComboBox Grid.Column="1" Name="LanguageBox" MinWidth="80" Margin="8,0,0,0"
+                ToolTip.Tip="Which cliloc file to read. Also changes what the canvas and the property tooltips show." />
+
+      <Button Grid.Column="2" Name="ApplyButton" Content="Apply" MinWidth="80"
+              Margin="8,0,0,0" IsEnabled="False" />
+
+      <TextBlock Grid.Column="3" Name="CountLabel" Foreground="#6A6A70"
+                 VerticalAlignment="Center" Margin="8,0,0,0" />
+
+    </Grid>
+
+    <ListBox Name="ResultList" Background="#1F1F23" Margin="6,0,6,6" SelectionMode="Single">
+      <ListBox.ItemsPanel>
+        <ItemsPanelTemplate>
+          <VirtualizingStackPanel Orientation="Vertical" />
+        </ItemsPanelTemplate>
+      </ListBox.ItemsPanel>
+    </ListBox>
+
+  </DockPanel>
+
+</UserControl>

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Headless gump document model: elements, pages, command-based undo, XML serialization, legacy NRBF import and the exporter contract.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Formats.Nrbf" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GumpStudio.Uo/GumpStudio.Uo.csproj" />
+  </ItemGroup>
+
+</Project>

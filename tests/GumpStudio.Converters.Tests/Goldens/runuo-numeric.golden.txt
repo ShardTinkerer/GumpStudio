@@ -1,0 +1,125 @@
+// Created 2026-01-02 03:04:05Z, with Gump Studio.
+// Exported with the RunUO exporter, after the original by Daegon and roadmaster.
+
+using Server;
+using Server.Commands;
+using Server.Gumps;
+using Server.Network;
+
+namespace Server.Gumps
+{
+    public class MyGump : Gump
+    {
+        public static void Initialize()
+        {
+            CommandSystem.Register("MyGump", AccessLevel.Administrator, OnCommand);
+        }
+
+        [Usage("MyGump")]
+        [Description("Opens the MyGump gump.")]
+        public static void OnCommand(CommandEventArgs e)
+        {
+            Mobile from = e.Mobile;
+
+            from.CloseGump(typeof(MyGump));
+            from.SendGump(new MyGump());
+        }
+
+        public MyGump() : base(50, 60)
+        {
+            Closable = false;
+            Disposable = false;
+            Dragable = false;
+            AddMasterGump(7);
+            AddECHandleInput();
+
+            AddPage(0);
+            // Frame: The window frame
+            AddBackground(0, 0, 300, 200, 5054);
+            // Wash
+            AddAlphaRegion(5, 5, 290, 190);
+            // Tiled
+            AddImageTiled(10, 10, 80, 20, 5124);
+            // Title: Says "hello"
+            AddLabel(20, 20, 88, @"He said ""hi""");
+            // Cropped
+            AddLabelCropped(20, 35, 120, 18, 90, @"Clipped text");
+            // Empty
+            AddLabel(20, 55, 0, @"");
+            // Pack
+            AddItem(20, 70, 3821);
+            // HuedPack
+            AddItem(45, 70, 3821, 12);
+            // Plain
+            AddImage(70, 70, 1417);
+            // Hued
+            AddImage(95, 70, 1417, 22);
+            // PartialHued
+            AddImage(120, 70, 1417, 22);
+            // Crop
+            AddPicInPic(20, 95, 1417, 60, 24, 10, 20);
+            // CropHued
+            AddPicInPic(85, 95, 1417, 60, 24, 10, 20);
+            // Icon
+            // No RunUO call for tilepicasgumppic: item 3823 at 150, 95.
+            // Go to page 1: Switches page
+            AddButton(20, 125, 247, 248, 0, GumpButtonType.Page, 1);
+            AddTooltip(1011036, @"one	TWO");
+            AddItemProperty(12345);
+            // Accept
+            AddButton(60, 125, 247, 248, 5, GumpButtonType.Reply, 0);
+            // Accept again
+            AddButton(100, 125, 247, 248, 5, GumpButtonType.Reply, 0);
+            // Tiled button
+            AddImageTiledButton(140, 125, 247, 248, 6, GumpButtonType.Reply, 0, 3823, 8, 4, 2);
+            // Agree
+            AddCheck(20, 150, 210, 211, true, 0);
+            // First
+            AddRadio(60, 150, 208, 209, false, 1);
+            // Second
+            AddRadio(100, 150, 208, 209, false, 2);
+            // Name
+            AddTextEntry(20, 170, 120, 20, 5, 1, @"type here");
+            // Limited
+            AddTextEntry(150, 170, 120, 20, 5, 2, @"", 16);
+            // Deep
+            AddImage(165, 75, 1417);
+
+            AddPage(1);
+            // Third
+            AddRadio(20, 20, 208, 209, false, 3);
+            // Markup
+            AddHtml(20, 40, 200, 60, @"<basefont color=#ffffff>literal ""markup""", true, true);
+            // Localised
+            AddHtmlLocalized(20, 105, 200, 40, 1049004, false, false);
+            // Coloured
+            AddHtmlLocalized(20, 150, 200, 40, 1049005, 65280, true, false);
+            // Tokenised
+            AddHtmlLocalized(20, 195, 200, 40, 1049006, @"alpha	beta", 65280, false, true);
+            // Back
+            AddButton(20, 240, 247, 248, 0, GumpButtonType.Page, 0);
+        }
+
+        public override void OnResponse(NetState sender, RelayInfo info)
+        {
+            Mobile from = sender.Mobile;
+
+            TextRelay entry1 = info.GetTextEntry(1);
+            string text1 = entry1 == null ? "" : entry1.Text.Trim();
+            TextRelay entry2 = info.GetTextEntry(2);
+            string text2 = entry2 == null ? "" : entry2.Text.Trim();
+
+            switch (info.ButtonID)
+            {
+                case 5:
+                    break;
+
+                case 6:
+                    break;
+
+                default:
+                    break;
+            }
+        }
+    }
+}

@@ -1,0 +1,79 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- One output root for the whole repository, rather than bin/obj beside
+         every project. Both properties are set explicitly: the default location
+         is derived from whichever Directory.Build.props MSBuild resolved, and
+         being unambiguous here is what lets the scripts and CI name one path. -->
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!-- .NET 10 removed the VSTest bridge; xunit.v3 runs on Microsoft.Testing.Platform. -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+
+    <!-- CS1591: missing XML doc comment. Keep the doc file for the public API
+         surface without demanding a comment on every internal member. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <!--
+    What a NativeAOT publish has to tolerate. Both apps publish AOT and both hit
+    the same two packages, so this lives here rather than being repeated.
+
+    IL3051 fires inside System.Formats.Nrbf, which Microsoft ships:
+    SZArrayRecord<T>.Deserialize overrides a RequiresDynamicCode member without
+    carrying the attribute. It is an annotation-consistency check, raised
+    whether or not the method is reachable, and the legacy importer never calls
+    it — it walks the records by hand with GetArray and GetRawValue and
+    deliberately never activates a type.
+
+    IL2104 and IL3053 are the per-assembly roll-ups, raised for Nrbf and for
+    Dock. Dock builds the data templates behind a dockable's title and close
+    button with bindings written as strings rather than compiled ones, and its
+    container generator reflects over whatever an ItemsSource hands it. Neither
+    depends on which Dock theme is in use. All of it is library code that this
+    repository cannot annotate; the published binaries are run by hand after a
+    dependency bump.
+
+    The warnings that matter still fail the build. A roll-up only covers code
+    shipped in a package — this repository's own IL2026 and IL3050 are reported
+    individually, and TreatWarningsAsErrors still stops the publish dead.
+  -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <NoWarn>$(NoWarn);IL3051;IL2104;IL3053</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Product>GumpStudio</Product>
+    <Company>GumpStudio Resurrection</Company>
+    <Copyright>Originally by Bradley Uffner, 2004.</Copyright>
+    <Version>2.0.0</Version>
+  </PropertyGroup>
+
+  <!--
+    Enforces this project's hard rules at compile time: no System.Drawing anywhere,
+    no BinaryFormatter ever, no culture-sensitive parsing. See BannedSymbols.txt.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
+
+</Project>

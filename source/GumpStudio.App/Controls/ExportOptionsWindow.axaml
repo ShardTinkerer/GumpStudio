@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.ExportOptionsWindow"
+        Title="Export options"
+        Width="380" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel Margin="16" Spacing="10">
+
+    <Grid ColumnDefinitions="90,*" RowDefinitions="Auto,Auto,Auto">
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="Dialect" VerticalAlignment="Center"
+                 Name="DialectLabel" />
+      <ComboBox Grid.Row="0" Grid.Column="1" Name="DialectBox"
+                HorizontalAlignment="Stretch" />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="Name" VerticalAlignment="Center"
+                 Margin="0,8,0,0" />
+      <TextBox Grid.Row="1" Grid.Column="1" Name="NameBox" Margin="0,8,0,0" />
+
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="Namespace" VerticalAlignment="Center"
+                 Margin="0,8,0,0" Name="NamespaceLabel" />
+      <TextBox Grid.Row="2" Grid.Column="1" Name="NamespaceBox" Margin="0,8,0,0" />
+
+    </Grid>
+
+    <CheckBox Name="CommentsBox" Content="Include element names and comments" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="80" />
+      <Button Name="AcceptButton" Content="Export" MinWidth="80" IsDefault="True" />
+    </StackPanel>
+
+  </StackPanel>
+</Window>

@@ -1,0 +1,174 @@
+// Created 2026-01-02 03:04:05Z, with Gump Studio.
+// Exported with POLGumpExporter ver 2.0 for gump pkg
+
+use uo;
+use os;
+
+include ":gumps:gumps";
+
+program gump_MyGump(who)
+
+	var MyGump := GFCreateGump(50,60);
+	
+	GFMovable(MyGump, 0);
+	GFClosable(MyGump, 0);
+	GFDisposable(MyGump, 0);
+	
+	//Gump package does not support mastergump
+	//mastergump 7
+	
+	
+	//Gump package does not support toggleupperwordcase
+	//toggleupperwordcase
+	
+	
+	//Gump package does not support togglecroppedtext
+	//togglecroppedtext
+	
+	
+	//Gump package does not support echandleinput
+	//echandleinput
+	
+	GFPage(MyGump, 0);
+	
+	//Frame: The window frame
+	GFResizePic(MyGump, 0, 0, 5054, 300, 200);
+	
+	//Wash
+	GFAddAlphaRegion(MyGump, 5, 5, 290, 190);
+	
+	//Tiled
+	
+	//Gump package does not support gumppictiled
+	//gumppictiled 10 10 80 20 5124
+	
+	
+	//Title: Says "hello"
+	GFTextLine(MyGump, 20, 20, 88, "He said \"hi\"");
+	
+	//Cropped
+	GFTextLine(MyGump, 20, 35, 90, "Clipped text");
+	
+	//Gump package does not support croppedtext
+	//croppedtext 20 35 120 18 90 0
+	
+	
+	//Empty
+	GFTextLine(MyGump, 20, 55, 0, "TextLine");
+	
+	//Pack
+	GFTilePic(MyGump, 20, 70, 3821, 0);
+	
+	//HuedPack
+	GFTilePic(MyGump, 45, 70, 3821, 12);
+	
+	//Plain
+	GFGumpPic(MyGump, 70, 70, 1417, 0);
+	
+	//Hued
+	GFGumpPic(MyGump, 95, 70, 1417, 22);
+	
+	//PartialHued
+	GFGumpPic(MyGump, 120, 70, 1417, 22);
+	
+	//Gump package does not support gumppicphued
+	//gumppicphued 120 70 1417 22
+	
+	
+	//Crop
+	
+	//Gump package does not support picinpic
+	//picinpic 20 95 1417 10 20 60 24
+	
+	
+	//CropHued
+	
+	//Gump package does not support picinpicphued
+	//picinpicphued 85 95 1417 10 20 60 24 15
+	
+	
+	//Icon
+	
+	//Gump package does not support tilepicasgumppic
+	//tilepicasgumppic 150 95 3823 2 3 4
+	
+	
+	//Go to page 1: Switches page
+	GFAddButton(MyGump, 20, 125, 247, 248, GF_PAGE_BTN, 1);
+	
+	//Gump package does not support tooltip
+	//tooltip 1011036 @one	TWO@
+	
+	
+	//Gump package does not support itemproperty
+	//itemproperty 12345
+	
+	
+	//Accept
+	GFAddButton(MyGump, 60, 125, 247, 248, GF_CLOSE_BTN, 5);
+	
+	//Accept again
+	GFAddButton(MyGump, 100, 125, 247, 248, GF_CLOSE_BTN, 5);
+	
+	//Tiled button
+	GFAddButton(MyGump, 140, 125, 247, 248, GF_CLOSE_BTN, 6);
+	
+	//Gump package does not support buttontileart
+	//buttontileart 140 125 247 248 1 0 6 3823 8 4 2
+	
+	
+	//Agree
+	GFCheckBox(MyGump, 20, 150, 210, 211, 1, 0);
+	
+	//First
+	GFSetRadioGroup(MyGump, 3);
+	GFRadioButton(MyGump, 60, 150, 208, 209, 0, 1);
+	
+	//Second
+	GFRadioButton(MyGump, 100, 150, 208, 209, 0, 2);
+	
+	//Name
+	GFTextEntry(MyGump, 20, 170, 120, 20, 5, "type here", 1);
+	
+	//Limited
+	GFTextEntry(MyGump, 150, 170, 120, 20, 5, "TextEntry", 2);
+	
+	//Gump package does not support textentrylimited
+	//textentrylimited 150 170 120 20 5 2 0 16
+	
+	
+	//Deep
+	GFGumpPic(MyGump, 165, 75, 1417, 0);
+	
+	GFPage(MyGump, 1);
+	
+	//Third
+	GFSetRadioGroup(MyGump, 3);
+	GFRadioButton(MyGump, 20, 20, 208, 209, 0, 3);
+	
+	//Markup
+	GFHTMLArea(MyGump, 20, 40, 200, 60, "<basefont color=#ffffff>literal \"markup\"", 1, 1);
+	
+	//Localised
+	GFAddHTMLLocalized(MyGump, 20, 105, 200, 40, 1049004);
+	
+	//Coloured
+	GFAddHTMLLocalized(MyGump, 20, 150, 200, 40, 1049005, 1, 0);
+	
+	//Gump package does not support xmfhtmlgumpcolor
+	//xmfhtmlgumpcolor 20 150 200 40 1049005 1 0 65280
+	
+	
+	//Tokenised
+	GFAddHTMLLocalized(MyGump, 20, 195, 200, 40, 1049006, 0, 1);
+	
+	//Gump package does not support xmfhtmltok
+	//xmfhtmltok 20 195 200 40 0 1 65280 1049006 @alpha	beta@
+	
+	
+	//Back
+	GFAddButton(MyGump, 20, 240, 247, 248, GF_PAGE_BTN, 0);
+
+	GFSendGump(who, MyGump);
+
+endprogram

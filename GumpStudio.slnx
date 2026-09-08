@@ -1,0 +1,48 @@
+<Solution>
+
+  <Folder Name="/source/">
+    <Project Path="source/GumpStudio.Uo/GumpStudio.Uo.csproj" />
+    <Project Path="source/GumpStudio.Core/GumpStudio.Core.csproj" />
+    <Project Path="source/GumpStudio.Rendering/GumpStudio.Rendering.csproj" />
+    <Project Path="source/GumpStudio.Converters/GumpStudio.Converters.csproj" />
+    <Project Path="source/GumpStudio.App/GumpStudio.App.csproj" />
+    <Project Path="source/GumpStudio.Cli/GumpStudio.Cli.csproj" />
+  </Folder>
+
+  <Folder Name="/tests/">
+    <Project Path="tests/GumpStudio.TestSupport/GumpStudio.TestSupport.csproj" />
+    <Project Path="tests/GumpStudio.Uo.Tests/GumpStudio.Uo.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Core.Tests/GumpStudio.Core.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Rendering.Tests/GumpStudio.Rendering.Tests.csproj" />
+    <Project Path="tests/GumpStudio.Converters.Tests/GumpStudio.Converters.Tests.csproj" />
+    <Project Path="tests/GumpStudio.App.Tests/GumpStudio.App.Tests.csproj" />
+  </Folder>
+
+  <Folder Name="/build/">
+    <File Path="build/publish-aot.ps1" />
+    <File Path="build/run-tests.ps1" />
+  </Folder>
+
+  <Folder Name="/docs/">
+    <File Path="docs/README.md" />
+    <File Path="docs/architecture.md" />
+    <File Path="docs/assets.md" />
+    <File Path="docs/gump-commands.md" />
+    <File Path="docs/legacy-gump-format.md" />
+    <File Path="docs/testing.md" />
+    <File Path="docs/uop-format.md" />
+  </Folder>
+
+  <Folder Name="/solution items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path="BannedSymbols.txt" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+    <File Path="THIRD-PARTY-NOTICES.md" />
+    <File Path="global.json" />
+  </Folder>
+
+</Solution>

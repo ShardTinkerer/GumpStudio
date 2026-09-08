@@ -1,0 +1,51 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.ColorPickerWindow"
+        Title="Text colour"
+        Width="360" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel Margin="16" Spacing="10">
+
+    <Border Name="Preview" Height="54" BorderThickness="1" BorderBrush="Gray" />
+
+    <Grid ColumnDefinitions="20,*,34" RowDefinitions="Auto,Auto,Auto">
+
+      <TextBlock Grid.Row="0" Grid.Column="0" Text="R" VerticalAlignment="Center" />
+      <Slider Grid.Row="0" Grid.Column="1" Name="RedSlider"
+              Minimum="0" Maximum="31" TickFrequency="1" IsSnapToTickEnabled="True" />
+      <TextBlock Grid.Row="0" Grid.Column="2" Name="RedValue"
+                 VerticalAlignment="Center" HorizontalAlignment="Right" />
+
+      <TextBlock Grid.Row="1" Grid.Column="0" Text="G" VerticalAlignment="Center" />
+      <Slider Grid.Row="1" Grid.Column="1" Name="GreenSlider"
+              Minimum="0" Maximum="31" TickFrequency="1" IsSnapToTickEnabled="True" />
+      <TextBlock Grid.Row="1" Grid.Column="2" Name="GreenValue"
+                 VerticalAlignment="Center" HorizontalAlignment="Right" />
+
+      <TextBlock Grid.Row="2" Grid.Column="0" Text="B" VerticalAlignment="Center" />
+      <Slider Grid.Row="2" Grid.Column="1" Name="BlueSlider"
+              Minimum="0" Maximum="31" TickFrequency="1" IsSnapToTickEnabled="True" />
+      <TextBlock Grid.Row="2" Grid.Column="2" Name="BlueValue"
+                 VerticalAlignment="Center" HorizontalAlignment="Right" />
+
+    </Grid>
+
+    <ItemsControl Name="Presets">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <WrapPanel />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+    </ItemsControl>
+
+    <TextBlock Name="Summary" TextWrapping="Wrap" />
+
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="80" />
+      <Button Name="AcceptButton" Content="OK" MinWidth="80" IsDefault="True" />
+    </StackPanel>
+
+  </StackPanel>
+</Window>

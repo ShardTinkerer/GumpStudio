@@ -1,0 +1,53 @@
+<Project>
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="UI">
+    <PackageVersion Include="Avalonia" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Themes.Simple" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.2" />
+    <PackageVersion Include="Avalonia.Headless" Version="12.1.2" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="Dock.Avalonia" Version="12.1.0.6" />
+    <PackageVersion Include="Dock.Model.Avalonia" Version="12.1.0.6" />
+    <PackageVersion Include="Dock.Avalonia.Themes.Simple" Version="12.1.0.6" />
+  </ItemGroup>
+
+  <ItemGroup Label="Rendering">
+    <PackageVersion Include="SkiaSharp" Version="4.151.2" />
+
+    <!--
+      SkiaSharp depends on its Win32 and macOS native assets but not on the Linux
+      ones, so Linux is the one platform where the native library has to be asked
+      for by name. Two things go wrong without this entry, and they look nothing
+      alike: projects that only reference SkiaSharp get no libSkiaSharp.so at all,
+      while GumpStudio.App gets Avalonia.Skia's transitive 3.119.x copy, and the
+      managed 4.151.2 refuses it as "native library (119.0) is incompatible".
+      Pinning the version here fixes the second through transitive pinning; the
+      PackageReference beside each SkiaSharp one fixes the first.
+    -->
+    <PackageVersion Include="SkiaSharp.NativeAssets.Linux" Version="4.151.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="Runtime">
+    <!-- Reads the legacy BinaryFormatter payloads in 1.8-era .gump files without
+         activating any type. Only shipped in the WindowsDesktop shared framework,
+         so the package keeps GumpStudio.Core cross-platform. -->
+    <PackageVersion Include="System.Formats.Nrbf" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup Label="Analyzers">
+    <PackageVersion Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="xunit.v3" Version="4.0.0" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.0" />
+    <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.4.0" />
+  </ItemGroup>
+
+</Project>

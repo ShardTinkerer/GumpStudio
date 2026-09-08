@@ -1,0 +1,32 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="GumpStudio.App.App"
+             RequestedThemeVariant="Dark">
+
+  <Application.Resources>
+    <!--
+      Dock rebuilds the control for a dockable whenever it is moved to another
+      dock. The panels are declared once in MainWindow.axaml and held by name,
+      so they have to be the same instances afterwards: recycling by dockable
+      id hands the existing control back instead of asking for a second one.
+    -->
+    <ControlRecycling x:Key="ControlRecyclingKey" TryToUseIdAsKey="True" />
+  </Application.Resources>
+
+  <Application.Styles>
+    <!--
+      Simple rather than Fluent. This is a tool for laying out a 1997 client's
+      UI: sharp edges, visible chrome and controls that sit still are worth more
+      here than rounded corners and animation, and a scroll bar that is always a
+      scroll bar cannot end up on top of the thing it is scrolling.
+    -->
+    <SimpleTheme />
+    <DockSimpleTheme />
+
+    <Style Selector="DockControl">
+      <Setter Property="(ControlRecyclingDataTemplate.ControlRecycling)"
+              Value="{StaticResource ControlRecyclingKey}" />
+    </Style>
+  </Application.Styles>
+
+</Application>

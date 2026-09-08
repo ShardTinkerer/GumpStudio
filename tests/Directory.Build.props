@@ -1,0 +1,15 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!--
+      xunit.v3 4.0.0 defaults to its own in-process console runner, which speaks
+      neither the Microsoft.Testing.Platform command line nor its server
+      protocol. Without this the test apps silently ignore the TRX and coverage
+      flags, and `dotnet test` finds no tests at all.
+    -->
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+  </PropertyGroup>
+
+</Project>

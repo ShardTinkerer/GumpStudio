@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>SkiaSharp renderer for gump documents, plus the shared hit-test and resize-handle geometry. Runs headless.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../GumpStudio.Core/GumpStudio.Core.csproj" />
+  </ItemGroup>
+
+</Project>

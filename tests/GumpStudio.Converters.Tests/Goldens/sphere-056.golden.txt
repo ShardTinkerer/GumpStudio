@@ -1,0 +1,70 @@
+// Created 2026-01-02 03:04:05Z, with Gump Studio.
+// Exported with the Sphere exporter, after the original by Francesco Furiani.
+// Script for 0.56 / Revisions
+
+[DIALOG d_mygump]
+50,60
+NOCLOSE
+NOMOVE
+NODISPOSE
+mastergump 7
+toggleupperwordcase
+togglecroppedtext
+echandleinput
+page 0
+resizepic 0 0 5054 300 200
+checkertrans 5 5 290 190
+gumppictiled 10 10 80 20 5124
+text 20 20 88 0
+croppedtext 20 35 120 18 90 1
+text 20 55 0 2
+tilepic 20 70 3821
+tilepichue 45 70 3821 12
+gumppic 70 70 1417
+gumppic 95 70 1417 22
+gumppicphued 120 70 1417 22
+picinpic 20 95 1417 10 20 60 24
+picinpicphued 85 95 1417 10 20 60 24 15
+tilepicasgumppic 150 95 3823 2 3 4
+button 20 125 247 248 0 1 0
+tooltip 1011036 @one	TWO@
+itemproperty 12345
+button 60 125 247 248 1 0 5
+button 100 125 247 248 1 0 5
+buttontileart 140 125 247 248 1 0 6 3823 8 4 2
+checkbox 20 150 210 211 1 0
+Group 3
+radio 60 150 208 209 0 1
+radio 100 150 208 209 0 2
+textentry 20 170 120 20 5 1 3
+textentrylimited 150 170 120 20 5 2 4 16
+gumppic 165 75 1417
+page 1
+Group 3
+radio 20 20 208 209 0 3
+htmlgump 20 40 200 60 5 1 1
+xmfhtmlgump 20 105 200 40 1049004 0 0
+xmfhtmlgumpcolor 20 150 200 40 1049005 1 0 65280
+xmfhtmltok 20 195 200 40 0 1 65280 1049006 @alpha	beta@
+button 20 240 247 248 0 0 0
+
+[DIALOG d_mygump TEXT]
+He said "hi"
+Clipped text
+Text id.2
+type here
+Textentry id.4
+<basefont color=#ffffff>literal "markup"
+
+[DIALOG d_mygump BUTTON]
+ON=5
+// Accept
+SRC.SYSMESSAGE Accepted
+
+ON=5
+// Accept again
+
+ON=6
+// Tiled button
+
+[EOF]

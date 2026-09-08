@@ -1,0 +1,190 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.MainWindow"
+        Title="GumpStudio"
+        Icon="/Assets/gumpstudio.ico"
+        Width="1280" Height="860"
+        MinWidth="900" MinHeight="600">
+
+  <DockPanel>
+
+    <Menu DockPanel.Dock="Top" Name="MainMenu">
+      <MenuItem Header="_File">
+        <MenuItem Header="_New" Name="MenuNew" InputGesture="Ctrl+N" />
+        <MenuItem Header="_Open…" Name="MenuOpen" InputGesture="Ctrl+O" />
+        <MenuItem Header="_Save" Name="MenuSave" InputGesture="Ctrl+S" />
+        <MenuItem Header="Save _As…" Name="MenuSaveAs" />
+        <Separator />
+        <MenuItem Header="_Import GumpStudio 1.8 file…" Name="MenuImportLegacy" />
+        <MenuItem Header="Import gump _layout…" Name="MenuImportLayout" />
+        <MenuItem Header="_Export" Name="MenuExport" />
+        <Separator />
+        <MenuItem Header="Set _client folder…" Name="MenuSetClient" />
+        <Separator />
+        <MenuItem Header="E_xit" Name="MenuExit" />
+      </MenuItem>
+
+      <MenuItem Header="_Edit" Name="MenuEditRoot">
+        <MenuItem Header="_Undo" Name="MenuUndo" InputGesture="Ctrl+Z" />
+        <MenuItem Header="_Redo" Name="MenuRedo" InputGesture="Ctrl+Y" />
+        <Separator />
+        <MenuItem Header="Cu_t" Name="MenuCut" InputGesture="Ctrl+X" />
+        <MenuItem Header="_Copy" Name="MenuCopy" InputGesture="Ctrl+C" />
+        <MenuItem Header="_Paste" Name="MenuPaste" InputGesture="Ctrl+V" />
+        <Separator />
+        <MenuItem Header="Select _all" Name="MenuSelectAll" InputGesture="Ctrl+A" />
+        <MenuItem Header="_Delete" Name="MenuDelete" InputGesture="Delete" />
+        <MenuItem Header="_Group selection" Name="MenuGroup" InputGesture="Ctrl+G" />
+        <MenuItem Header="_Ungroup" Name="MenuUngroup" InputGesture="Ctrl+Shift+G" />
+        <Separator />
+        <MenuItem Header="Bring to _front" Name="MenuBringToFront" InputGesture="Ctrl+Shift+Up" />
+        <MenuItem Header="Bring for_ward" Name="MenuBringForward" InputGesture="Ctrl+Up" />
+        <MenuItem Header="Send back_ward" Name="MenuSendBackward" InputGesture="Ctrl+Down" />
+        <MenuItem Header="Send to _back" Name="MenuSendToBack" InputGesture="Ctrl+Shift+Down" />
+        <Separator />
+        <MenuItem Header="_Arrange" Name="MenuArrange">
+          <MenuItem Header="Align _lefts" Name="MenuAlignLeft" />
+          <MenuItem Header="Align _rights" Name="MenuAlignRight" />
+          <MenuItem Header="Align _tops" Name="MenuAlignTop" />
+          <MenuItem Header="Align _bottoms" Name="MenuAlignBottom" />
+          <Separator />
+          <MenuItem Header="Centre _horizontally" Name="MenuCentreH" />
+          <MenuItem Header="Centre _vertically" Name="MenuCentreV" />
+          <Separator />
+          <MenuItem Header="Equalise horizontal _spacing" Name="MenuSpaceH" />
+          <MenuItem Header="Equalise vertical spa_cing" Name="MenuSpaceV" />
+        </MenuItem>
+      </MenuItem>
+
+      <MenuItem Header="_View">
+        <MenuItem Header="Show page _0 beneath this page" Name="MenuShowPage0"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <Separator />
+        <MenuItem Header="Show _grid" Name="MenuShowGrid" ToggleType="CheckBox" />
+        <MenuItem Header="_Snap to grid" Name="MenuSnapToGrid" ToggleType="CheckBox" />
+        <MenuItem Header="Grid _size…" Name="MenuGridSize" />
+        <Separator />
+        <MenuItem Header="Zoom _in" Name="MenuZoomIn" InputGesture="Ctrl+OemPlus" />
+        <MenuItem Header="Zoom _out" Name="MenuZoomOut" InputGesture="Ctrl+OemMinus" />
+        <MenuItem Header="_Actual size" Name="MenuZoomReset" InputGesture="Ctrl+D0" />
+        <MenuItem Header="_Fit to window" Name="MenuZoomFit" />
+        <Separator />
+        <!--
+          Hiding and showing a panel lives here rather than on the tab's close
+          button: Dock's close removes a dockable from its owner outright, so
+          nothing could bring it back, while hide stores it on the root for
+          RestoreDockable to find.
+        -->
+        <MenuItem Header="_Toolbox panel" Name="MenuPanelToolbox"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <MenuItem Header="_Elements panel" Name="MenuPanelElements"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <MenuItem Header="_Properties panel" Name="MenuPanelProperties"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <MenuItem Header="_Cliloc panel" Name="MenuPanelCliloc"
+                  ToggleType="CheckBox" IsChecked="True" />
+        <Separator />
+        <MenuItem Header="_Reset panel layout" Name="MenuResetLayout" />
+      </MenuItem>
+
+      <MenuItem Header="_Gump">
+        <MenuItem Header="_Properties…" Name="MenuGumpProperties" />
+      </MenuItem>
+
+      <MenuItem Header="_Page" Name="MenuPageRoot">
+        <MenuItem Header="_Add page" Name="MenuAddPage" />
+        <MenuItem Header="_Insert page here" Name="MenuInsertPage" />
+        <MenuItem Header="_Remove page" Name="MenuRemovePage" />
+        <MenuItem Header="_Clear page" Name="MenuClearPage" />
+        <Separator />
+        <MenuItem Header="_Move selection to page" Name="MenuMoveToPage" />
+      </MenuItem>
+
+      <MenuItem Header="_Help">
+        <MenuItem Header="_About GumpStudio…" Name="MenuAbout" />
+      </MenuItem>
+
+    </Menu>
+
+    <Border DockPanel.Dock="Bottom" Background="#1F1F23" Padding="8,4">
+      <TextBlock Name="StatusText" Foreground="#C8C8C8" Text="Ready." />
+    </Border>
+
+    <!--
+      The side panels are Dock tools rather than fixed grid columns, so each
+      one can be re-tabbed, stacked, floated or pinned away and the canvas
+      keeps the middle.
+
+      None of the tools carries its content here. Dock treats what a Tool holds
+      in XAML as a template it builds when the tab is first shown, which puts
+      the controls outside this window's name scope and out of reach of the
+      constructor. The panels are separate views, and the constructor hands
+      each one to its tool instead.
+    -->
+    <DockControl x:Name="Layout" InitializeLayout="True" InitializeFactory="True">
+
+      <DockControl.Factory>
+        <Factory />
+      </DockControl.Factory>
+
+      <RootDock x:Name="Root" Id="Root" IsCollapsable="False"
+                DefaultDockable="{Binding #MainLayout}">
+
+        <ProportionalDock x:Name="MainLayout" Id="MainLayout" Orientation="Horizontal">
+
+          <ToolDock x:Name="ToolboxPane" Id="ToolboxPane" Proportion="0.13" Alignment="Left">
+            <!--
+              Nothing here can be closed. Closing a tool hides it, and no menu
+              brings one back yet, so a stray click on a tab's close button
+              would cost a panel for the rest of the session.
+            -->
+            <Tool x:Name="ToolboxTool" Id="ToolboxTool" Title="Toolbox" CanClose="False" />
+          </ToolDock>
+
+          <ProportionalDockSplitter x:Name="LeftSplitter" Id="LeftSplitter" />
+
+          <!--
+            The canvas and the cliloc browser share the middle column. The
+            browser is a wide, short list - an id and a sentence - so it belongs
+            under the canvas rather than beside it, where it would either crush
+            the gump or truncate every string.
+          -->
+          <ProportionalDock x:Name="CenterPane" Id="CenterPane"
+                            Orientation="Vertical" Proportion="0.6">
+
+            <DocumentDock x:Name="CanvasPane" Id="CanvasPane" Proportion="0.75"
+                          CanCreateDocument="False" IsCollapsable="False">
+              <Document x:Name="GumpDocument" Id="GumpDocument" Title="Gump" CanClose="False" />
+            </DocumentDock>
+
+            <ProportionalDockSplitter x:Name="ClilocSplitter" Id="ClilocSplitter" />
+
+            <ToolDock x:Name="ClilocPane" Id="ClilocPane" Proportion="0.25" Alignment="Bottom">
+              <Tool x:Name="ClilocTool" Id="ClilocTool" Title="Cliloc" CanClose="False" />
+            </ToolDock>
+
+          </ProportionalDock>
+
+          <ProportionalDockSplitter x:Name="RightSplitter" Id="RightSplitter" />
+
+          <ProportionalDock x:Name="RightPane" Id="RightPane" Orientation="Vertical" Proportion="0.27">
+
+            <ToolDock x:Name="ElementsPane" Id="ElementsPane" Proportion="0.35" Alignment="Right">
+              <Tool x:Name="ElementsTool" Id="ElementsTool" Title="Elements" CanClose="False" />
+            </ToolDock>
+
+            <ProportionalDockSplitter x:Name="PropertiesSplitter" Id="PropertiesSplitter" />
+
+            <ToolDock x:Name="PropertiesPane" Id="PropertiesPane" Proportion="0.65" Alignment="Right">
+              <Tool x:Name="PropertiesTool" Id="PropertiesTool" Title="Properties" CanClose="False" />
+            </ToolDock>
+
+          </ProportionalDock>
+
+        </ProportionalDock>
+      </RootDock>
+
+    </DockControl>
+
+  </DockPanel>
+</Window>

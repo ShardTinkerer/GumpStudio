@@ -1,0 +1,19 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.SplashWindow"
+        Title="GumpStudio"
+        Width="454" Height="158"
+        WindowDecorations="None"
+        CanResize="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="CenterScreen">
+
+  <!--
+    The graphic is 454x158 and is shown at exactly that size. It is a JPEG of a
+    2004 Photoshop composition, so any scaling shows: interpolation smears the
+    lettering, and nearest-neighbour makes the marbling blocky.
+  -->
+  <Image Name="Graphic" Stretch="None" />
+
+</Window>

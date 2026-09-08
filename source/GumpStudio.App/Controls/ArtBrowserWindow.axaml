@@ -1,0 +1,103 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="GumpStudio.App.Controls.ArtBrowserWindow"
+        Title="Browse art"
+        Width="1200" Height="800"
+        WindowStartupLocation="CenterOwner">
+
+  <DockPanel Margin="8">
+
+    <!-- Search -->
+    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" Margin="0,0,0,8">
+      <TextBlock Grid.Column="0" Text="Filter" VerticalAlignment="Center" Margin="0,0,8,0" />
+      <TextBox Grid.Column="1" Name="FilterBox"
+               PlaceholderText="id (decimal or 0x…) or name" />
+      <ToggleButton Grid.Column="2" Name="GalleryToggle" Content="Gallery"
+                    Margin="8,0,0,0" MinWidth="80"
+                    ToolTip.Tip="Show the art as a grid of tiles instead of a list." />
+      <TextBlock Grid.Column="3" Text="Size" VerticalAlignment="Center" Margin="12,0,6,0" />
+      <NumericUpDown Grid.Column="4" Name="TileSizeBox" Width="110"
+                     Minimum="32" Maximum="320" Increment="16" FormatString="0"
+                     ToolTip.Tip="Thumbnail size, in pixels. Remembered between sessions." />
+      <TextBlock Grid.Column="5" Name="CountText" VerticalAlignment="Center"
+                 Margin="8,0,0,0" Foreground="Gray" />
+    </Grid>
+
+    <!-- Buttons -->
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+      <Button Name="CancelButton" Content="Cancel" MinWidth="90" />
+      <Button Name="AcceptButton" Content="Select" MinWidth="90" IsDefault="True" />
+    </StackPanel>
+
+    <!--
+      The list and the preview share a grid with a splitter between them rather
+      than the preview being docked at a fixed width. Gump art runs to several
+      hundred pixels across, so which of the two needs the room depends entirely
+      on what is being looked at.
+    -->
+    <Grid Name="Panes">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" MinWidth="200" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="260" MinWidth="160" />
+      </Grid.ColumnDefinitions>
+
+      <!-- Results -->
+      <Border Grid.Column="0" BorderBrush="#40FFFFFF" BorderThickness="1">
+        <ListBox Name="Results" SelectionMode="Single">
+
+        <!-- In gallery mode a list item is a whole row of tiles, so the row's
+             own hover and selection highlight spans seven unrelated pieces of
+             art and reads as if all of them were picked. The tiles draw their
+             own. -->
+        <ListBox.Styles>
+          <Style Selector="ListBox.gallery ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+          </Style>
+          <Style Selector="ListBox.gallery ListBoxItem:pointerover /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+          </Style>
+          <Style Selector="ListBox.gallery ListBoxItem:selected /template/ ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+          </Style>
+        </ListBox.Styles>
+
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate>
+              <VirtualizingStackPanel Orientation="Vertical" />
+            </ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+        </ListBox>
+      </Border>
+
+      <GridSplitter Grid.Column="1" Name="PreviewSplitter" Width="6"
+                    ResizeDirection="Columns" Background="Transparent"
+                    ToolTip.Tip="Drag to give the preview more room." />
+
+      <!-- Preview -->
+      <Border Grid.Column="2" BorderBrush="#40FFFFFF" BorderThickness="1" Padding="8">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Name="PreviewTitle" Text="Nothing selected"
+                     FontWeight="Bold" TextWrapping="Wrap" Margin="0,0,0,4" />
+          <TextBlock DockPanel.Dock="Top" Name="PreviewDetail" Foreground="Gray"
+                     TextWrapping="Wrap" Margin="0,0,0,8" />
+          <Border Background="#20000000">
+            <!--
+              Uniform and DownOnly, not None. At native size anything wider than
+              the pane was simply cropped, so a wide gump could not be seen whole
+              however the window was arranged. Art that already fits is still
+              drawn pixel for pixel, and nearest-neighbour keeps what is scaled
+              from turning into a blur.
+            -->
+            <Image Name="PreviewImage" Stretch="Uniform" StretchDirection="DownOnly"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   RenderOptions.BitmapInterpolationMode="None" />
+          </Border>
+        </DockPanel>
+      </Border>
+
+    </Grid>
+
+  </DockPanel>
+</Window>
