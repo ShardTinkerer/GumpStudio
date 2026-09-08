@@ -1,8 +1,6 @@
-# GumpStudio rewrite — documentation
+# GumpStudio Resurrection — documentation
 
-The rewrite targets **.NET 10** with an **Avalonia** cross-platform UI. It
-replaces the decompiled .NET Framework 4.8 WinForms port, which is preserved on
-the `main` branch.
+Built on **.NET 10** with an **Avalonia** cross-platform UI.
 
 | Document | What it covers |
 |---|---|
@@ -10,6 +8,7 @@ the `main` branch.
 | [gump-commands.md](gump-commands.md) | The client's layout commands and how the editor models each one |
 | [testing.md](testing.md) | Running the tests, including against real UO clients |
 | [legacy-gump-format.md](legacy-gump-format.md) | How 1.8 saved `.gump` and `.gumpling`, and how they are read now |
+| [uop-format.md](uop-format.md) | The `.uop` container and the MegaCliloc codec inside it |
 | [assets.md](assets.md) | The 1.8 artwork, and how it was recovered |
 
 ## Quick start
@@ -32,7 +31,7 @@ dotnet run --project source/GumpStudio.Cli -- dump --client "C:/path/to/UO" --gu
 ## Repository layout
 
 ```
-source/          the rewrite
+source/          the application
 tests/           test projects, including the real-client matrix
 build/           the scripts CI runs — tests and NativeAOT publishing
 docs/            this directory
@@ -43,6 +42,6 @@ Output is centralised by `UseArtifactsOutput` in the root
 `Directory.Build.props`: no project has a `bin` or `obj` beside it, so
 `artifacts/` is the whole of what a build leaves behind.
 
-The 2004 binaries the rewrite was checked against are **not** in the
+The 2004 binaries this editor's behaviour was checked against are **not** in the
 repository — they are not redistributable, and `external/` is in `.gitignore` so
 that a local copy under that name can never be committed.

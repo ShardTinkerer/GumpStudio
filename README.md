@@ -1,17 +1,16 @@
-# Gump Studio
+# GumpStudio Resurrection
 
 A gump editor for Ultima Online, originally written in VB.NET by Bradley Uffner
 in 2004.
 
-This repository holds a rewrite on **.NET 10** with an **Avalonia** UI, running
-on Windows, Linux and macOS. It reads both classic `.mul` and modern `.uop`
-client data, so it works with clients from 2001 through to current. You can
-place elements, edit their properties, save, import a gump captured off the
-wire, and export raw client layout, POL, RunUO and Sphere.
+Built on **.NET 10** with an **Avalonia** UI, running on Windows, Linux and
+macOS. It reads both classic `.mul` and modern `.uop` client data, so it works
+with clients from 2001 through to current. You can place elements, edit their
+properties, save, import a gump captured off the wire, and export raw client
+layout, POL, RunUO and Sphere.
 
-> **Status: alpha.** Usable, but several conveniences from the old application
-> are not built yet. [docs/architecture.md](docs/architecture.md) lists the
-> known gaps.
+> Not everything the 2004 application could do is here yet.
+> [docs/architecture.md](docs/architecture.md) lists the known gaps.
 
 ## Building
 
@@ -71,7 +70,7 @@ workload, elsewhere clang and zlib's headers.
 ## Repository layout
 
 ```
-source/          the rewrite
+source/          the application
 tests/           tests, including a matrix run against real clients
 build/           the scripts CI runs — tests and NativeAOT publishing
 docs/            architecture, testing, file format, assets
@@ -90,6 +89,7 @@ deleting that one directory cleans the repository completely.
 | [docs/gump-commands.md](docs/gump-commands.md) | The client's layout commands and how the editor models each one |
 | [docs/testing.md](docs/testing.md) | Running the tests, including against real clients |
 | [docs/legacy-gump-format.md](docs/legacy-gump-format.md) | How 1.8 saved `.gump` and `.gumpling`, and how they are read now |
+| [docs/uop-format.md](docs/uop-format.md) | The `.uop` container and the MegaCliloc codec inside it |
 | [docs/assets.md](docs/assets.md) | The 1.8 artwork, and how it was recovered |
 
 ## Credits
@@ -104,15 +104,16 @@ Sphere exporter by Francesco Furiani and Mark Chandler. The Sphere exporter is a
 port of Francesco Furiani's, and the RunUO exporter of roadmaster / Mark
 Sweetman's, itself based on Daegon / Eric Brown's.
 
-The `.uop` container and its Burrows-Wheeler stage were understood with
-reference to the [ClassicUO](https://github.com/ClassicUO/ClassicUO) project
-(BSD-2-Clause).
+The `.uop` container and its MegaCliloc compression stage were reverse
+engineered from the client binary and checked against retail files;
+[docs/uop-format.md](docs/uop-format.md) records the format and how each part of
+it was confirmed.
 
 ## Licence
 
-MIT, in [LICENSE](LICENSE). It covers this rewrite: the 2004 original carried no
-stated licence and its source is lost, so nothing here can be a grant on its
-author's behalf. The two recovered artwork assets, the ClassicUO notice and the
-exporters' lineage are recorded in
+MIT, in [LICENSE](LICENSE). It covers the code in this repository: the 2004
+original carried no stated licence and its source is lost, so nothing here can
+be a grant on its author's behalf. The two recovered artwork assets and the exporters' lineage are
+recorded in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md), which ships in every release
 archive.

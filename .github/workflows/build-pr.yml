@@ -1,7 +1,7 @@
 name: Build (PR)
 
-# Any target branch, not just main: the rewrite lives on a long-running branch
-# and pull requests into it deserve the same gate as the ones into main.
+# Any target branch, not just main: work that lands through a staging branch
+# deserves the same gate as a pull request straight into main.
 on:
   pull_request:
     branches: ["**"]

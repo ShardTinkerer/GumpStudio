@@ -12,7 +12,7 @@ namespace GumpStudio.App.Controls;
 /// <remarks>
 /// Carries the 1.8 credits verbatim as well as the version, because the artwork
 /// and most of the ideas in the editor are still Bradley Uffner's and Melanius's
-/// — the rewrite changed the code, not the authorship of what it reproduces.
+/// — this version changed the code, not the authorship of what it reproduces.
 /// </remarks>
 public sealed partial class AboutWindow : Window
 {

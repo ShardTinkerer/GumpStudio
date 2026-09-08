@@ -1,6 +1,6 @@
 # The legacy `.gump` and `.gumpling` formats
 
-How GumpStudio 1.8 saved its documents, and how this rewrite reads them without
+How GumpStudio 1.8 saved its documents, and how they are read now without
 re-enabling `BinaryFormatter`. Nothing here is a client format — these are the
 2004 editor's own files, and the only reason they are documented is that the
 importer has to keep reading them.
@@ -44,7 +44,7 @@ exporter has ever written one.
 build on any reference to it. The importer uses **`System.Formats.Nrbf`**,
 in-box since .NET 9, which decodes the record stream **without ever activating a
 type**: it walks the records by hand with `GetArray` and `GetRawValue` and maps
-the field names above onto the rewrite's own element model.
+the field names above onto this editor's own element model.
 
 That is what makes the import read-only by construction. There is no path by
 which a crafted `.gump` can cause a type to be constructed, because nothing in

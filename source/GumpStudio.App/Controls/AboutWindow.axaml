@@ -23,10 +23,10 @@
         <TextBlock Name="RuntimeText" Foreground="Gray" />
       </StackPanel>
 
-      <TextBlock Text="This rewrite" FontWeight="Bold" Foreground="LightSkyBlue" />
+      <TextBlock Text="This version" FontWeight="Bold" Foreground="LightSkyBlue" />
 
       <TextBlock TextWrapping="Wrap" Foreground="#C8C8C8"
-                 Text="A rebuild of GumpStudio on .NET and Avalonia: the same editor, without the Windows-only drawing stack, the plugin folder or the static loaders that made changing the client path a restart." />
+                 Text="Runs on Windows, Linux and macOS. Reads both classic .mul and modern .uop client data, from 2001-era clients through to current, and exports raw client layout, POL, RunUO and Sphere." />
 
       <TextBlock Text="The original" FontWeight="Bold" Foreground="LightSkyBlue" />
 

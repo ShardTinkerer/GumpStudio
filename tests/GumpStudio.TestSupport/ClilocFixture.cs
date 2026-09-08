@@ -9,9 +9,9 @@ namespace GumpStudio.TestSupport;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Only the plain record stream is produced. A MegaCliloc-wrapped file would
-/// need a Burrows-Wheeler <em>encoder</em>, which does not exist here, so that
-/// path stays covered only by the real-client tests.
+/// Produces the plain record stream by default, or the MegaCliloc-wrapped form
+/// modern clients ship — see <see cref="MegaClilocFixture"/> — so the reader's
+/// choice between the two readings can be tested without a client.
 /// </para>
 /// <para>
 /// Entries are written in the order they were added, not sorted, so a test can
@@ -56,11 +56,17 @@ public sealed class ClilocFixture
     /// Cuts this many bytes off the end, producing the half-written file a
     /// failed patch leaves behind.
     /// </param>
+    /// <param name="wrapped">
+    /// Wraps the finished stream in the MegaCliloc codec, as a modern client
+    /// ships it. Applied last, so <paramref name="trailingSlack"/> and
+    /// <paramref name="truncateBy"/> damage the records rather than the wrapper.
+    /// </param>
     public byte[] ToBytes(
         uint version = 2,
         ushort unused = 0,
         int trailingSlack = 0,
-        int truncateBy = 0)
+        int truncateBy = 0,
+        bool wrapped = false)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(trailingSlack);
         ArgumentOutOfRangeException.ThrowIfNegative(truncateBy);
@@ -100,7 +106,12 @@ public sealed class ClilocFixture
 
         byte[] built = [.. bytes];
 
-        return truncateBy == 0 ? built : built[..Math.Max(0, built.Length - truncateBy)];
+        if (truncateBy != 0)
+        {
+            built = built[..Math.Max(0, built.Length - truncateBy)];
+        }
+
+        return wrapped ? MegaClilocFixture.Encode(built) : built;
     }
 
     /// <summary>Writes <c>cliloc.&lt;language&gt;</c> into a directory.</summary>

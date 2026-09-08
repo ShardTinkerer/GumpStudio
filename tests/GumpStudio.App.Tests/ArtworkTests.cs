@@ -13,7 +13,7 @@ namespace GumpStudio.App.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// These assets are the one part of the rewrite that cannot be regenerated from
+/// These assets are the one part of this repository that cannot be regenerated from
 /// source: the splash graphic came out of a base64 blob in a WinForms
 /// <c>.resx</c>, and the icon out of the PE resource directory of a 2004
 /// executable. If a build drops them, the failure at runtime is a missing-asset

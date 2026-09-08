@@ -110,7 +110,7 @@ button x y released pressed 1 0       <value>  // replies and closes
 carries a `// TODO: Page or Reply???` comment. It inverted the quit flag, put a
 page button's target page in the return-value slot, and a reply button's return
 value in the page slot. The result was a page button that closed the gump and a
-reply button that jumped to a page numbered after its reply id. The rewrite emits
+reply button that jumped to a page numbered after its reply id. This editor emits
 the layout above, which is what the POL reference, the client's parser and RunUO
 all describe.
 

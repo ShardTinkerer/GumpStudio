@@ -30,6 +30,7 @@
     <File Path="docs/gump-commands.md" />
     <File Path="docs/legacy-gump-format.md" />
     <File Path="docs/testing.md" />
+    <File Path="docs/uop-format.md" />
   </Folder>
 
   <Folder Name="/solution items/">

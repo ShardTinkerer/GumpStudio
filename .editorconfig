@@ -51,7 +51,7 @@ dotnet_naming_style.underscore_camel.required_prefix = _
 dotnet_naming_style.underscore_camel.capitalization = camel_case
 
 # --- correctness rules promoted to errors ---
-# These are the exact defect classes catalogued in the rewrite plan; the build
+# These are the exact defect classes this codebase was built to avoid; the build
 # should refuse to reintroduce them.
 dotnet_diagnostic.CA2000.severity = error   # dispose objects before losing scope
 dotnet_diagnostic.CA1063.severity = error   # implement IDisposable correctly

@@ -397,7 +397,7 @@ public sealed partial class MainWindow : Window, IDisposable
     /// Starts reading the cliloc table, without waiting for it.
     /// </summary>
     /// <remarks>
-    /// Not awaited on purpose. The read is a Burrows-Wheeler decompress and
+    /// Not awaited on purpose. The read is a MegaCliloc decode and
     /// around 124,000 strings; awaiting it here would hold a document named on
     /// the command line behind a table nothing has asked for yet. It runs off
     /// the UI thread and the panel fills in when it lands.

@@ -10,8 +10,8 @@ public enum UopCompression : ushort
     Zlib = 1,
 
     /// <summary>
-    /// Zlib, then a Burrows-Wheeler stage. Retail <c>gumpartLegacyMUL.uop</c>
+    /// Zlib, then the MegaCliloc codec. Retail <c>gumpartLegacyMUL.uop</c>
     /// uses this for every entry.
     /// </summary>
-    ZlibBwt = 3,
+    ZlibMegaCliloc = 3,
 }

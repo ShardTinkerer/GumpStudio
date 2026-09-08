@@ -5,7 +5,7 @@ namespace GumpStudio.Core.Primitives;
 /// <summary>An integer point in gump coordinates.</summary>
 /// <remarks>
 /// A local type rather than <c>System.Drawing.Point</c>, which is banned across
-/// the rewrite: it drags in a Windows-only dependency and it is the reason the
+/// this codebase: it drags in a Windows-only dependency and it is the reason the
 /// old code could not be tested headlessly.
 /// </remarks>
 public readonly record struct GumpPoint(int X, int Y)

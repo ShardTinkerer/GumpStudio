@@ -141,6 +141,48 @@ public class ClilocTableTests
         Assert.Equal("seven", table.GetText(7));
     }
 
+    /// <summary>
+    /// The wrapped form modern clients ship reads back the same as the plain one.
+    /// </summary>
+    /// <remarks>
+    /// This used to be reachable only through a real client, because writing it
+    /// needs a MegaCliloc encoder. Non-ASCII is in the sample on purpose: a
+    /// wrapper that lost or gained a byte would surface as mojibake here rather
+    /// than as a clean failure.
+    /// </remarks>
+    [Fact]
+    public void ReadsTheWrappedFormModernClientsShip()
+    {
+        ClilocFixture fixture = new ClilocFixture()
+            .Add(1000, "hammer pick")
+            .Add(1001, "Zaubertränke", flag: 1)
+            .Add(1002, "~1_VAL~ stones", flag: 2);
+
+        ClilocTable wrapped = ClilocTable.Parse(fixture.ToBytes(wrapped: true));
+
+        Assert.Equal(3, wrapped.Count);
+        Assert.Equal("hammer pick", wrapped.GetText(1000));
+        Assert.Equal("Zaubertränke", wrapped.GetText(1001));
+        Assert.Equal("~1_VAL~ stones", wrapped.GetText(1002));
+
+        Assert.Equal(
+            ClilocTable.Parse(fixture.ToBytes()).Entries.Select(entry => entry.Text),
+            wrapped.Entries.Select(entry => entry.Text));
+    }
+
+    /// <summary>
+    /// A wrapped file opening with version 0 is the trap the reader guards
+    /// against: the version cannot say which of the two forms this is.
+    /// </summary>
+    [Fact]
+    public void ReadsAWrappedFileThatOpensWithVersionZero()
+    {
+        ClilocTable table = ClilocTable.Parse(
+            new ClilocFixture().Add(7, "seven").ToBytes(version: 0, wrapped: true));
+
+        Assert.Equal("seven", table.GetText(7));
+    }
+
     [Fact]
     public void AMissingIdReadsAsNullTextAndADefaultedEntry()
     {

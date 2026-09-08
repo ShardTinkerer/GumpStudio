@@ -12,12 +12,17 @@ namespace GumpStudio.Uo.Files;
 /// so a reader must hash the expected path to find an entry.
 /// </para>
 /// <para>
-/// The algorithm is the Jenkins lookup2 variant used by the Mythic packaging
-/// tool. It is transcribed register-for-register from the original, which is why
-/// the locals are named after x86 registers: the mixing order and the exact
-/// rotate amounts are load-bearing, and "tidying" them silently produces a hash
-/// that matches nothing. <c>UopHashTests</c> pins it against values taken from a
-/// real client package.
+/// The algorithm is Bob Jenkins' <c>lookup3</c>, in its <c>hashlittle2</c>
+/// two-word form; the client's copy lives at <c>0x0042C9B2</c>. Each character
+/// contributes its full 16-bit value, the seed is <c>length + 0xDEADBEEF</c>,
+/// input is consumed in blocks of twelve, and the 64-bit result packs the two
+/// output words as <c>(b &lt;&lt; 32) | c</c>.
+/// </para>
+/// <para>
+/// The mixing order and the exact rotate amounts are load-bearing: "tidying"
+/// them silently produces a hash that matches nothing. <c>UopHashTests</c> pins
+/// this against values taken from a real client package, and is the only thing
+/// that makes changing this file safe.
 /// </para>
 /// </remarks>
 public static class UopHash
@@ -25,70 +30,71 @@ public static class UopHash
     /// <summary>Hashes a build path, which must already be lowercase ASCII.</summary>
     public static ulong Compute(ReadOnlySpan<char> path)
     {
-        uint eax = 0;
-        uint ecx;
-        uint edx;
-
-        uint ebx = (uint)path.Length + 0xDEADBEEF;
-        uint edi = ebx;
-        uint esi = ebx;
+        uint a = (uint)path.Length + 0xDEADBEEF;
+        uint b = a;
+        uint c = a;
 
         int i = 0;
+        int remaining = path.Length;
 
-        for (; i + 12 < path.Length; i += 12)
+        while (remaining > 12)
         {
-            edi += Read32(path, i + 4);
-            esi += Read32(path, i + 8);
-            edx = Read32(path, i) - esi;
+            a += Read32(path, i);
+            b += Read32(path, i + 4);
+            c += Read32(path, i + 8);
 
-            edx = (edx + ebx) ^ Rotate(esi, 4);
-            esi += edi;
-            edi = (edi - edx) ^ Rotate(edx, 6);
-            edx += esi;
-            esi = (esi - edi) ^ Rotate(edi, 8);
-            edi += edx;
-            ebx = (edx - esi) ^ Rotate(esi, 16);
-            esi += edi;
-            edi = (edi - ebx) ^ Rotate(ebx, 19);
-            ebx += esi;
-            esi = (esi - edi) ^ Rotate(edi, 4);
-            edi += ebx;
+            Mix(ref a, ref b, ref c);
+
+            i += 12;
+            remaining -= 12;
         }
 
-        int remaining = path.Length - i;
-
-        if (remaining == 0)
-        {
-            return ((ulong)esi << 32) | eax;
-        }
-
-        // Tail characters are folded in most-significant-first, falling through.
+        // The tail is folded in most-significant-first, falling through.
         switch (remaining)
         {
-            case 12: esi += (uint)path[i + 11] << 24; goto case 11;
-            case 11: esi += (uint)path[i + 10] << 16; goto case 10;
-            case 10: esi += (uint)path[i + 9] << 8; goto case 9;
-            case 9: esi += path[i + 8]; goto case 8;
-            case 8: edi += (uint)path[i + 7] << 24; goto case 7;
-            case 7: edi += (uint)path[i + 6] << 16; goto case 6;
-            case 6: edi += (uint)path[i + 5] << 8; goto case 5;
-            case 5: edi += path[i + 4]; goto case 4;
-            case 4: ebx += (uint)path[i + 3] << 24; goto case 3;
-            case 3: ebx += (uint)path[i + 2] << 16; goto case 2;
-            case 2: ebx += (uint)path[i + 1] << 8; goto case 1;
-            case 1: ebx += path[i]; break;
-            default: break;
+            case 12: c += (uint)path[i + 11] << 24; goto case 11;
+            case 11: c += (uint)path[i + 10] << 16; goto case 10;
+            case 10: c += (uint)path[i + 9] << 8; goto case 9;
+            case 9: c += path[i + 8]; goto case 8;
+            case 8: b += (uint)path[i + 7] << 24; goto case 7;
+            case 7: b += (uint)path[i + 6] << 16; goto case 6;
+            case 6: b += (uint)path[i + 5] << 8; goto case 5;
+            case 5: b += path[i + 4]; goto case 4;
+            case 4: a += (uint)path[i + 3] << 24; goto case 3;
+            case 3: a += (uint)path[i + 2] << 16; goto case 2;
+            case 2: a += (uint)path[i + 1] << 8; goto case 1;
+            case 1: a += path[i]; break;
+
+            // An empty path is never mixed at all, so the low word stays zero.
+            case 0: return (ulong)c << 32;
         }
 
-        esi = (esi ^ edi) - Rotate(edi, 14);
-        ecx = (esi ^ ebx) - Rotate(esi, 11);
-        edi = (edi ^ ecx) - Rotate(ecx, 25);
-        esi = (esi ^ edi) - Rotate(edi, 16);
-        edx = (esi ^ ecx) - Rotate(esi, 4);
-        edi = (edi ^ edx) - Rotate(edx, 14);
-        eax = (esi ^ edi) - Rotate(edi, 24);
+        Final(ref a, ref b, ref c);
 
-        return ((ulong)edi << 32) | eax;
+        return ((ulong)b << 32) | c;
+    }
+
+    /// <summary>The block mix, run once per twelve characters consumed.</summary>
+    private static void Mix(ref uint a, ref uint b, ref uint c)
+    {
+        a -= c; a ^= Rotate(c, 4); c += b;
+        b -= a; b ^= Rotate(a, 6); a += c;
+        c -= b; c ^= Rotate(b, 8); b += a;
+        a -= c; a ^= Rotate(c, 16); c += b;
+        b -= a; b ^= Rotate(a, 19); a += c;
+        c -= b; c ^= Rotate(b, 4); b += a;
+    }
+
+    /// <summary>The avalanche applied once, after the tail has been folded in.</summary>
+    private static void Final(ref uint a, ref uint b, ref uint c)
+    {
+        c ^= b; c -= Rotate(b, 14);
+        a ^= c; a -= Rotate(c, 11);
+        b ^= a; b -= Rotate(a, 25);
+        c ^= b; c -= Rotate(b, 16);
+        a ^= c; a -= Rotate(c, 4);
+        b ^= a; b -= Rotate(a, 14);
+        c ^= b; c -= Rotate(b, 24);
     }
 
     /// <summary>Hashes the path produced by formatting <paramref name="pattern"/> with an index.</summary>

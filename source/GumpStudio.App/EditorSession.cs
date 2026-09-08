@@ -81,9 +81,9 @@ public sealed class EditorSession : IDisposable
     /// </summary>
     /// <remarks>
     /// Held here rather than reached through <see cref="Data"/> so that nothing
-    /// can touch the table by accident: reading it is a Burrows-Wheeler
-    /// decompress and around 124,000 strings, which is why opening a client
-    /// deliberately defers it.
+    /// can touch the table by accident: reading it is a MegaCliloc decode and
+    /// around 124,000 strings, which is why opening a client deliberately
+    /// defers it.
     /// </remarks>
     public IReadOnlyList<ClilocEntry>? ClilocStrings { get; private set; }
 

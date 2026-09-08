@@ -78,7 +78,7 @@ public class GridRenderingTests
     }
 
     /// <summary>
-    /// The guard that predates the rewrite: below three pixels the dots merge
+    /// The guard that predates the tiled fill: below three pixels the dots merge
     /// into a wash, so nothing is drawn at all.
     /// </summary>
     [Theory]

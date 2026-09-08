@@ -54,7 +54,7 @@ public sealed class UopFileProvider : IUoFileProvider
     /// </summary>
     /// <remarks>
     /// Decoding is expensive — inflate plus, for compression flag 3, a
-    /// Burrows-Wheeler pass — and the normal access pattern is
+    /// MegaCliloc pass — and the normal access pattern is
     /// <see cref="GetEntry"/> immediately followed by <see cref="Read"/> for the
     /// same index, so a memo of the single last payload already collapsed that
     /// pair to one decode.
@@ -349,7 +349,7 @@ public sealed class UopFileProvider : IUoFileProvider
         {
             UopCompression.None => raw,
             UopCompression.Zlib => Inflate(raw, entry.DecompressedLength),
-            UopCompression.ZlibBwt => BwtDecoder.Decompress(
+            UopCompression.ZlibMegaCliloc => MegaClilocDecoder.Decompress(
                 Inflate(raw, entry.DecompressedLength).Span),
             _ => ReadOnlyMemory<byte>.Empty,
         };

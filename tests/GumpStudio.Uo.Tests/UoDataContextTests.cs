@@ -285,6 +285,7 @@ public class UoDataContextTests
         Assert.Contains(context.ClilocLanguage, context.ClilocLanguages);
 
         List<string> broken = [];
+        List<string> empty = [];
         List<bool> readable = [];
 
         foreach (string language in context.ClilocLanguages)
@@ -292,12 +293,11 @@ public class UoDataContextTests
             Assert.True(context.UseClilocLanguage(language));
             Assert.Equal(language, context.ClilocLanguage);
 
-            // No minimum count, and an empty table is allowed. A shipped
-            // translation is often partial - this matrix has a Cliloc.chs of
-            // 46 KB beside a Cliloc.enu of 5 MB - and one Cliloc.deu does not
-            // decompress at all, which the reader reports as no strings rather
-            // than as nonsense. What must never happen is being handed text
-            // that is not text: misread bytes produce U+FFFD in droves.
+            // No minimum count: a shipped translation is often partial, and this
+            // matrix has a Cliloc.chs of 46 KB holding 453 strings beside a
+            // Cliloc.enu of 5 MB holding 123,399. But every one of them must
+            // hold something, and none may be handed back as text that is not
+            // text - misread bytes produce U+FFFD in droves.
             int sampled = 0;
             int mangled = 0;
 
@@ -313,6 +313,11 @@ public class UoDataContextTests
 
             readable.Add(context.Clilocs.Count > 10000);
 
+            if (context.Clilocs.Count == 0)
+            {
+                empty.Add($"cliloc.{language}");
+            }
+
             if (mangled >= (sampled / 100) + 1)
             {
                 broken.Add(
@@ -325,9 +330,15 @@ public class UoDataContextTests
         // than the first one to trip an assertion does.
         Assert.True(broken.Count == 0, $"Mangled: {string.Join("; ", broken)}");
 
-        // At least one of them has to hold strings. Without this, a reader that
-        // returned an empty table for every language would pass the loop above
-        // by having nothing to mangle.
+        // An empty table is how the reader reports a file it could not decode,
+        // and it is invisible to the mangling check above because there is
+        // nothing to mangle. Every cliloc in every client of the matrix decodes,
+        // so anything empty here is a regression rather than a partial
+        // translation.
+        Assert.True(empty.Count == 0, $"Decoded to nothing: {string.Join("; ", empty)}");
+
+        // Guards the other direction: a reader handing back one plausible string
+        // per language would satisfy both checks above.
         Assert.Contains(true, readable);
     }
 

@@ -191,15 +191,12 @@ to-do list.
   drawing into Avalonia's own canvas through `ISkiaSharpApiLease` would remove
   the CPU raster and the 3 MB per-frame texture upload, but taking an `SKCanvas`
   across that boundary means matching Avalonia's SkiaSharp major version.
-- **`BwtDecoder` mis-decompresses at least one real file.** The reference
-  client's `Cliloc.deu` comes back as nonsense, so that language reports no
-  strings; the other seven in the same client are fine. `ClilocTable.Parse`
-  returns an empty table rather than garbage when neither reading looks like
-  text, because a caller can render `#1044017` for a string it does not have but
-  cannot tell that a string it was handed is wrong.
-- **The BWT decoder is only covered by real-client tests**, so CI never
-  exercises it. Closing that needs either a BWT *encoder* written purely for
-  fixtures, or a small captured byte pair checked in.
+- **`ClilocTable.Parse` reports an empty table rather than garbage** when neither
+  the plain nor the decoded reading looks like text. A caller can render
+  `#1044017` for a string it does not have, but it cannot tell that a string it
+  was handed is wrong. Every cliloc in the test matrix decodes today, so an empty
+  table is now a regression signal and
+  `UoDataContextTests.ReadsEveryClilocLanguageTheClientShips` asserts on it.
 - **Resolving a UOP gump's dimensions requires decoding it**, because the size
   lives inside the compressed payload. An art browser must therefore virtualise
   and resolve lazily rather than measuring everything up front. The payload memo

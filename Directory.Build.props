@@ -65,7 +65,7 @@
   </PropertyGroup>
 
   <!--
-    Enforces the rewrite's hard rules at compile time: no System.Drawing anywhere,
+    Enforces this project's hard rules at compile time: no System.Drawing anywhere,
     no BinaryFormatter ever, no culture-sensitive parsing. See BannedSymbols.txt.
   -->
   <ItemGroup>

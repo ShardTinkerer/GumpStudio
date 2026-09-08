@@ -15,10 +15,10 @@ namespace GumpStudio.Uo.Data;
 /// </para>
 /// <para>
 /// Two on-disk forms exist. Classic clients store the record stream verbatim.
-/// Modern clients wrap the whole file in the "MegaCliloc" codec, which turns out
-/// to be the same Burrows-Wheeler transform UOP uses for compression flag 3 —
-/// so <see cref="BwtDecoder"/> handles both. The old SDK knew nothing about the
-/// wrapper and would read a modern file as garbage.
+/// Modern clients wrap the whole file in the MegaCliloc codec, the same one UOP
+/// uses for compression flag 3, so <see cref="MegaClilocDecoder"/> handles both.
+/// The old SDK knew nothing about the wrapper and would read a modern file as
+/// garbage.
 /// </para>
 /// <para>
 /// Clients older than roughly 2002 instead ship numbered <c>clilocNN.enu</c>
@@ -122,7 +122,7 @@ public sealed class ClilocTable
             return direct;
         }
 
-        byte[] decoded = BwtDecoder.Decompress(raw);
+        byte[] decoded = MegaClilocDecoder.Decompress(raw);
 
         if (decoded.Length >= HeaderSize
             && TryParsePlain(decoded, out ClilocTable unwrapped)
@@ -158,6 +158,7 @@ public sealed class ClilocTable
 
         int sampled = 0;
         int mangled = 0;
+        int empty = 0;
 
         foreach (ClilocEntry entry in _entries.Values)
         {
@@ -166,13 +167,28 @@ public sealed class ClilocTable
                 mangled++;
             }
 
+            if (entry.Text.Length == 0)
+            {
+                empty++;
+            }
+
             if (++sampled == sampleSize)
             {
                 break;
             }
         }
 
-        return sampled > 0 && mangled * sampleSize <= mangledLimit * sampled;
+        if (sampled == 0 || mangled * sampleSize > mangledLimit * sampled)
+        {
+            return false;
+        }
+
+        // Runs of zero bytes walk as a long, tidy stream of zero-length records,
+        // and empty strings cannot be mangled, so that reading would otherwise
+        // pass unchallenged and beat the real one. Every cliloc across the test
+        // matrix has all 256 of its first entries non-empty, so a simple
+        // majority is far below anything a real file approaches.
+        return empty * 2 < sampled;
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-# Rules the rewrite exists to enforce. Format: <documentation ID>;<message>
+# Rules this project exists to enforce. Format: <documentation ID>;<message>
 # See https://github.com/dotnet/roslyn-analyzers/blob/main/src/Microsoft.CodeAnalysis.BannedApiAnalyzers/BannedApiAnalyzers.Help.md
 
 # --- System.Drawing: the whole data/render stack is span + SkiaSharp now. ---

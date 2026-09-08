@@ -13,7 +13,7 @@ namespace GumpStudio.Uo.Tests;
 /// while requests arrived one at a time in the order the reader expected. An art
 /// browser interleaves indices, and on a container that keeps its dimensions
 /// inside the payload every entry lookup is itself a decode — so revisiting an
-/// entry meant a fresh inflate, and a Burrows-Wheeler pass with it.
+/// entry meant a fresh inflate, and a MegaCliloc pass with it.
 ///
 /// What matters here is that widening the window changed nothing about what is
 /// read back, including once entries start being evicted.

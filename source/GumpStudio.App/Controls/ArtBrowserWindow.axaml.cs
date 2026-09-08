@@ -39,7 +39,7 @@ public enum ArtBrowserKind
 /// <para>
 /// The id list is built with the cheap existence probe rather than by decoding,
 /// because on a UOP client resolving a gump's dimensions costs a full inflate
-/// plus Burrows-Wheeler pass. Thumbnails are decoded only for the tiles the
+/// plus MegaCliloc pass. Thumbnails are decoded only for the tiles the
 /// panel actually realises, and off the UI thread.
 /// </para>
 /// </remarks>
@@ -1116,7 +1116,7 @@ public sealed partial class ArtBrowserWindow : Window, IDisposable
     /// Shows the selected art at full size.
     /// </summary>
     /// <remarks>
-    /// The decode runs on the pool. It is a full inflate, Burrows-Wheeler pass
+    /// The decode runs on the pool. It is a full inflate, MegaCliloc pass
     /// and RLE decode of full-size art, and this is reached from every click and
     /// every arrow-key move through the list, so doing it inline stalled the
     /// window once per keypress and contended with the background thumbnail

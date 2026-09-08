@@ -186,7 +186,7 @@ public class MulFileProviderTests
 /// </summary>
 /// <remarks>
 /// It must not decode: on a UOP gump package, asking for an entry's dimensions
-/// costs an inflate plus a Burrows-Wheeler pass, and a browser walks tens of
+/// costs an inflate plus a MegaCliloc pass, and a browser walks tens of
 /// thousands of ids.
 /// </remarks>
 public class ProviderExistenceTests

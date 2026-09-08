@@ -98,9 +98,16 @@ retail package, so the algorithm stays pinned with no client present. This
 matters because a synthetic package built by our own writer would share any
 mistake in the hash and still round-trip perfectly.
 
-**Gap:** the Burrows-Wheeler decoder is exercised only by real-client tests.
-Closing it needs either a BWT encoder written purely for fixtures, or a small
-captured input/output pair checked in.
+`MegaClilocFixture` encodes MegaCliloc payloads, so the decoder is covered with
+no client too — round trips over runs, alternating pairs, skewed and random data,
+and malformed inputs that must decode to nothing. It is written from the format
+rather than derived from the decoder, so a mistake in one does not cancel out in
+the other, and it deliberately does not reproduce the byte stream the client's
+encoder emits: any stream that decodes back to the original is a valid encoding.
+
+The one thing it cannot supply is the header mask, which is pinned instead
+against four bytes of a real file's header — a number, not client data. See
+[uop-format.md](uop-format.md).
 
 ## Driving the application for a screenshot
 

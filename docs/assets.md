@@ -1,7 +1,7 @@
 # Assets recovered from GumpStudio 1.8
 
 Two pieces of artwork in `source/GumpStudio.App/Assets/` came out of the 2004
-build rather than being drawn for the rewrite. Neither can be regenerated from
+build rather than being drawn for this editor. Neither can be regenerated from
 this repository's source, so how they were obtained is written down here.
 
 | File | Origin |
@@ -10,10 +10,9 @@ this repository's source, so how they were obtained is written down here.
 | `gumpstudio.ico` | the icon resource on `Gumpstudio1.8r3/GumpStudio.exe` |
 
 Neither origin is in this repository, and the paths above are relative to where
-each one is. The decompiled port those `.resx` files belong to is preserved on
-the **`main` branch**, under `src/`. The three shipped 1.8 builds are binaries
-that are not redistributable, so they are kept **outside** the working tree; the
-name `external/` is in `.gitignore` so a local copy can never be committed.
+each one is. The three shipped 1.8 builds are binaries that are not
+redistributable, so they are kept **outside** the working tree; the name
+`external/` is in `.gitignore` so a local copy can never be committed.
 
 The original's own about text credits the artwork to **Melanius**; the editor it
 belongs to was written by **Bradley Uffner**. `AboutWindow` repeats those credits

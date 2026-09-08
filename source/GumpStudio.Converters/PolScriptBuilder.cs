@@ -31,7 +31,7 @@ public enum PolScriptStyle
 /// primary-constructor parameters on a struct are silently skipped by
 /// <c>default</c> and by <c>new()</c>, so every "default" would have come out
 /// <see langword="false"/> — which is exactly the sort of quiet wrong answer
-/// this rewrite is meant to remove.
+/// this codebase is meant to remove.
 /// </remarks>
 public sealed record PolExportOptions
 {
