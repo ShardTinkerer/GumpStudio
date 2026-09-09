@@ -431,7 +431,16 @@ public class RunUoExportTests
             SourceY = 5,
         }));
 
-        Assert.Contains("AddPicInPic(0, 0, 9000, 20, 30, 4, 5);", script, StringComparison.Ordinal);
+        // AddSpriteImage is what both ServUO and ModernUO call it; no core has
+        // ever defined AddPicInPic, which this used to emit and which does not
+        // compile. Verified against a from-source build of ServUO Pub 57.
+        Assert.Contains(
+            "AddSpriteImage(0, 0, 9000, 20, 30, 4, 5);", script, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("AddPicInPic", script, StringComparison.Ordinal);
+
+        // Both cores transpose these on the wire, so the note has to survive.
+        Assert.Contains("transpose width/height with sx/sy", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -474,7 +483,7 @@ public class RunUoExportTests
         }));
 
         int image = script.IndexOf("AddImage(0, 0, 55);", StringComparison.Ordinal);
-        int tooltip = script.IndexOf("AddTooltip(1042971, @\"Bob\");", StringComparison.Ordinal);
+        int tooltip = script.IndexOf("AddTooltip(1042971);", StringComparison.Ordinal);
         int property = script.IndexOf("AddItemProperty(1073741825);", StringComparison.Ordinal);
 
         Assert.True(image >= 0 && tooltip > image && property > tooltip, script);
@@ -490,8 +499,77 @@ public class RunUoExportTests
 
         string script = Build(document);
 
-        Assert.Contains("AddMasterGump(3000);", script, StringComparison.Ordinal);
+        // AddMasterGump is in no RunUO or ServUO core; emitting it was a
+        // compile error. ModernUO spells the command AddGumpIDOverride.
+        Assert.Contains(
+            "// No core call for mastergump 3000 (ModernUO: AddGumpIDOverride).",
+            script,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain("AddMasterGump", script, StringComparison.Ordinal);
+
         Assert.Contains("AddECHandleInput();", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// ServUO carries its two-argument <c>AddTooltip</c> commented out in its own
+    /// source, so a tooltip's substitutions cannot be passed. The cliloc still
+    /// renders; the export says what was dropped.
+    /// </summary>
+    [Fact]
+    public void TooltipArgumentsAreReportedRatherThanPassed()
+    {
+        string script = Build(WithElement(new ImageElement
+        {
+            GumpId = 55,
+            TooltipClilocId = 1042971,
+            TooltipArguments = "Bob",
+        }));
+
+        Assert.Contains(
+            "// Tooltip arguments dropped, no core overload takes them: @\"Bob\"",
+            script,
+            StringComparison.Ordinal);
+
+        Assert.Contains("AddTooltip(1042971);", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Both ServUO and ModernUO expose <c>AddGroup</c>. Skipping it left every
+    /// radio on a page in one group, so buttons that should have been mutually
+    /// exclusive were not.
+    /// </summary>
+    [Fact]
+    public void RadioGroupsAreEmitted()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 3, Value = 1 });
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 3, Value = 2 });
+
+        string script = Build(document);
+
+        int group = script.IndexOf("AddGroup(3);", StringComparison.Ordinal);
+        int radio = script.IndexOf("AddRadio(", StringComparison.Ordinal);
+
+        Assert.True(group >= 0 && radio > group, script);
+    }
+
+    /// <summary>
+    /// The client resets the current group on every page, so a group used again
+    /// on a later page has to be declared again there.
+    /// </summary>
+    [Fact]
+    public void TheSameGroupIsDeclaredAgainOnTheNextPage()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 3, Value = 1 });
+        document.AddPage().Root.Add(new RadioElement { GroupId = 3, Value = 2 });
+
+        string script = Build(document);
+
+        Assert.Equal(2, script.Split("AddGroup(3);").Length - 1);
     }
 
     [Fact]

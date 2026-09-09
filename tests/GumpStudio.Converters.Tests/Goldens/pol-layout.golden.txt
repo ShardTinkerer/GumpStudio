@@ -1,5 +1,6 @@
 // Created 2026-01-02 03:04:05Z, with Gump Studio.
 // Exported with POLGumpExporter ver 2.0
+// Gump 0x2A
 
 use uo;
 use os;
@@ -24,7 +25,7 @@ program gump_MyGump(who)
 		"tilepic 20 70 3821",
 		"tilepichue 45 70 3821 12",
 		"gumppic 70 70 1417",
-		"gumppic 95 70 1417 22",
+		"gumppichued 95 70 1417 22",
 		"gumppicphued 120 70 1417 22",
 		"picinpic 20 95 1417 10 20 60 24",
 		"picinpicphued 85 95 1417 10 20 60 24 15",

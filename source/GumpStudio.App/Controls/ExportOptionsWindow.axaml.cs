@@ -26,6 +26,7 @@ public sealed partial class ExportOptionsWindow : Window
     private readonly TextBox _name = null!;
     private readonly TextBox _namespace = null!;
     private readonly CheckBox _comments = null!;
+    private readonly CheckBox _placeholders = null!;
     private readonly IReadOnlyList<ConverterDialect> _dialects = [];
 
     /// <summary>Parameterless constructor for the XAML designer.</summary>
@@ -48,12 +49,14 @@ public sealed partial class ExportOptionsWindow : Window
         _name = this.FindControl<TextBox>("NameBox")!;
         _namespace = this.FindControl<TextBox>("NamespaceBox")!;
         _comments = this.FindControl<CheckBox>("CommentsBox")!;
+        _placeholders = this.FindControl<CheckBox>("PlaceholdersBox")!;
 
         Title = title;
 
         _name.Text = options.GumpName;
         _namespace.Text = options.Namespace;
         _comments.IsChecked = options.IncludeComments;
+        _placeholders.IsChecked = options.PlaceholderText;
 
         // A converter with one form has nothing to ask about, so the row goes
         // rather than showing a picker with a single entry.
@@ -77,6 +80,7 @@ public sealed partial class ExportOptionsWindow : Window
                     ? options.Namespace
                     : _namespace.Text,
                 IncludeComments = _comments.IsChecked ?? true,
+                PlaceholderText = _placeholders.IsChecked ?? true,
                 Dialect = SelectedDialect(),
             };
 

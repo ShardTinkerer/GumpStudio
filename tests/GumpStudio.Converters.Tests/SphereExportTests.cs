@@ -308,6 +308,9 @@ public class SphereExportTests
 
     [Theory]
     [InlineData(0, false, "gumppic 0 0 55")]
+    // Sphere has no GUMPPICHUED key; its GUMPPIC handler turns a trailing
+    // token into the hue= form the client reads, so the bare form is the
+    // right one here and gumppichued would not be recognised at all.
     [InlineData(33, false, "gumppic 0 0 55 33")]
     [InlineData(33, true, "gumppicphued 0 0 55 33")]
     public void AGumpImagePicksTheCommandThatMatchesItsHueMode(int hue, bool partial, string expected)

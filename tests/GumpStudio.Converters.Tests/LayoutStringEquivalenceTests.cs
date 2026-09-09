@@ -27,9 +27,12 @@ public class LayoutStringEquivalenceTests
     /// <summary>POL lowercases the group command and closes the group at page end.</summary>
     private static readonly LayoutStringOptions Pol = new();
 
-    /// <summary>Sphere capitalises it and has never emitted an endgroup.</summary>
+    /// <summary>
+    /// Sphere capitalises it, has never emitted an endgroup, and takes the bare
+    /// hued <c>gumppic</c> because it re-emits the command itself.
+    /// </summary>
     private static readonly LayoutStringOptions Sphere =
-        new() { GroupKeyword = "Group", EmitEndGroup = false };
+        new() { GroupKeyword = "Group", EmitEndGroup = false, HuedGumpPicCommand = false };
 
     [Fact]
     public void MatchesThePolLayoutDialect() =>
@@ -39,15 +42,24 @@ public class LayoutStringEquivalenceTests
     public void MatchesTheSphereRevisionDialect() =>
         Assert.Equal(GoldenCommands("sphere-056"), Written(Sphere));
 
-    /// <summary>The two dialects differ only in the ways the options describe.</summary>
+    /// <summary>
+    /// The two dialects differ only in the ways the options describe: the group
+    /// keyword, the endgroup, and how a full tint is spelled.
+    /// </summary>
+    /// <remarks>
+    /// The last one is not cosmetic in either direction. The client drops a bare
+    /// hue on <c>gumppic</c>, so POL needs <c>gumppichued</c>; Sphere has no
+    /// <c>GUMPPICHUED</c> key and converts a trailing token to <c>hue=</c>
+    /// itself, so it needs the bare form.
+    /// </remarks>
     [Fact]
-    public void TheTwoDialectsDifferOnlyInGroupHandling()
+    public void TheTwoDialectsDifferOnlyInGroupAndHueSpelling()
     {
         IEnumerable<string> polOnly = Written(Pol).Except(Written(Sphere), StringComparer.Ordinal);
         IEnumerable<string> sphereOnly = Written(Sphere).Except(Written(Pol), StringComparer.Ordinal);
 
-        Assert.Equal(["group 3", "endgroup"], polOnly);
-        Assert.Equal(["Group 3"], sphereOnly);
+        Assert.Equal(["gumppichued 95 70 1417 22", "group 3", "endgroup"], polOnly);
+        Assert.Equal(["gumppic 95 70 1417 22", "Group 3"], sphereOnly);
     }
 
     private static List<string> Written(LayoutStringOptions options)

@@ -60,8 +60,9 @@ public enum TextRole
 /// <remarks>
 /// Deliberately not the resolved index or the resolved string. The same slot
 /// reaches output three ways: as an index, as an inline literal, and as a literal
-/// <c>0</c> in the gump package's notes about commands it cannot express — that
-/// output has no data array for a real index to point into.
+/// <c>0</c> in the layout lines the gump-package dialect appends for commands it
+/// has no function for — that output has no data array for a real index to point
+/// into.
 /// </remarks>
 public readonly record struct TextRef(int Index);
 

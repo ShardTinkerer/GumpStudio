@@ -114,11 +114,10 @@ public class PolExportTests
         Assert.Contains("GFSendGump(who, MyGump);", script, StringComparison.Ordinal);
         Assert.Contains("endprogram", script, StringComparison.Ordinal);
 
-        // The gump package has no tiled call, so the original commented it out.
-        // The name in the note is taken from the command on the line below it, so
-        // it is lowercase where the original spelled it "GumpPicTiled".
-        Assert.Contains("//Gump package does not support gumppictiled", script, StringComparison.Ordinal);
-        Assert.Contains("//gumppictiled 60 60 40 30 4", script, StringComparison.Ordinal);
+        // The package gained GFPicTiled after 1.8, which knew only the original
+        // element set and commented this one out.
+        Assert.Contains("GFPicTiled(MyGump, 60, 60, 40, 30, 4);", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("gumppictiled", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -293,6 +292,50 @@ public class PolExportTests
         Assert.DoesNotContain("//Title", without, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// <see cref="GumpProperties.TypeId"/> is read by the importer out of a
+    /// capture tool's header and was then dropped by every converter. It is not a
+    /// layout command and <c>SendDialogGump</c> takes no id, so the header comment
+    /// is the only place it can go.
+    /// </summary>
+    [Fact]
+    public void TheCapturedGumpIdReachesTheHeaderOfBothDialects()
+    {
+        GumpDocument document = new();
+
+        Assert.DoesNotContain("// Gump 0x", Package(document), StringComparison.Ordinal);
+
+        document.Properties.TypeId = 0x1CC;
+
+        Assert.Contains("// Gump 0x1CC", Package(document), StringComparison.Ordinal);
+        Assert.Contains("// Gump 0x1CC", Layout(document), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The placeholder choice was reachable only from the builder API, so nothing
+    /// going through <see cref="IGumpConverter"/> — the app and the CLI — could
+    /// turn it off.
+    /// </summary>
+    [Fact]
+    public void ThePlaceholderChoiceReachesTheConverter()
+    {
+        PolConverter converter = new();
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new LabelElement { Location = GumpPoint.Origin, Text = string.Empty });
+
+        Assert.Contains(
+            "\"TextLine\"",
+            converter.Export(document, new GumpExportOptions { GumpName = "g" }),
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "\"\"",
+            converter.Export(
+                document, new GumpExportOptions { GumpName = "g", PlaceholderText = false }),
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public void OutputIsReproducibleForAFixedTimestamp()
     {
@@ -343,6 +386,9 @@ public class PolExportTests
     private static string Layout(GumpDocument document) =>
         PolScriptBuilder.Build(
             document, "g", new PolExportOptions { Style = PolScriptStyle.LayoutStrings }, Stamp);
+
+    private static string Package(GumpDocument document) =>
+        PolScriptBuilder.Build(document, "g", null, Stamp);
 
     private static GumpDocument WithElement(Element element)
     {
@@ -412,7 +458,7 @@ public class PolExportTests
 
     [Theory]
     [InlineData(0, false, "gumppic 0 0 55")]
-    [InlineData(33, false, "gumppic 0 0 55 33")]
+    [InlineData(33, false, "gumppichued 0 0 55 33")]
     [InlineData(33, true, "gumppicphued 0 0 55 33")]
     public void AGumpImagePicksTheCommandThatMatchesItsHueMode(int hue, bool partial, string expected)
     {
@@ -668,23 +714,394 @@ public class PolExportTests
         Assert.Equal(2, occurrences);
     }
 
-    [Fact]
-    public void TheGumpPackageCommentsOutWhatItHasNoFunctionFor()
+    /// <summary>
+    /// The package gained <c>GFPicInPic</c>, so the whole family goes through one
+    /// call with the hue mode as its trailing flag. It used to be commented out.
+    /// </summary>
+    [Theory]
+    [InlineData(0, false, "GFPicInPic(g, 0, 0, 9000, 4, 5, 20, 30, 0, 0);")]
+    [InlineData(7, false, "GFPicInPic(g, 0, 0, 9000, 4, 5, 20, 30, 7, 0);")]
+    [InlineData(7, true, "GFPicInPic(g, 0, 0, 9000, 4, 5, 20, 30, 7, 1);")]
+    public void APicInPicUsesGfPicInPic(int hue, bool partial, string expected)
     {
-        GumpDocument document = new();
-
-        document.Pages[0].Root.Add(new PicInPicElement
+        string script = Package(WithElement(new PicInPicElement
         {
             Location = GumpPoint.Origin,
             Size = new GumpSize(20, 30),
             GumpId = 9000,
             SourceX = 4,
             SourceY = 5,
+            Hue = hue,
+            PartialHue = partial,
+        }));
+
+        Assert.Contains(expected, script, StringComparison.Ordinal);
+        Assert.DoesNotContain("XGFAddToLayout", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TileArtInAGumpSlotUsesGfTilePicAsGumpPic()
+    {
+        string script = Package(WithElement(new TileAsGumpElement
+        {
+            Location = GumpPoint.Origin,
+            ItemId = 3821,
+            LinkId = 1,
+            ParamB = 2,
+            ParamC = 3,
+        }));
+
+        Assert.Contains("GFTilePicAsGumpPic(g, 0, 0, 3821, 1, 2, 3);", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("XGFAddToLayout", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATiledImageUsesGfPicTiled()
+    {
+        string script = Package(WithElement(new TiledElement
+        {
+            Location = new GumpPoint(10, 20),
+            Size = new GumpSize(80, 30),
+            GumpId = 5124,
+        }));
+
+        Assert.Contains("GFPicTiled(g, 10, 20, 80, 30, 5124);", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("gumppictiled", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The previous version emitted <c>GFTextLine</c> and noted the rectangle as
+    /// lost, which drew the label unclipped and at its full width.
+    /// </summary>
+    [Fact]
+    public void ACroppedLabelUsesGfTextCrop()
+    {
+        string script = Package(WithElement(new LabelElement
+        {
+            Location = GumpPoint.Origin,
+            Text = "clip",
+            Hue = 5,
+            Cropped = true,
+            Size = new GumpSize(90, 18),
+        }));
+
+        Assert.Contains("GFTextCrop(g, 0, 0, 90, 18, 5, \"clip\");", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("GFTextLine", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACappedTextEntryPassesTheLimitAsATrailingArgument()
+    {
+        string script = Package(WithElement(new TextEntryElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(120, 20),
+            EntryId = 2,
+            MaxLength = 40,
+        }));
+
+        Assert.Contains(
+            "GFTextEntry(g, 0, 0, 120, 20, 0, \"TextEntry\", 2, 40);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUncappedTextEntryOmitsTheLimitArgument()
+    {
+        string script = Package(WithElement(new TextEntryElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(120, 20),
+            EntryId = 2,
+        }));
+
+        Assert.Contains(
+            "GFTextEntry(g, 0, 0, 120, 20, 0, \"TextEntry\", 2);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATileArtButtonUsesGfAddImageTileButton()
+    {
+        string script = Package(WithElement(new ButtonElement
+        {
+            Location = GumpPoint.Origin,
+            NormalId = 1,
+            PressedId = 2,
+            Kind = ButtonKind.Reply,
+            Param = 3,
+            TileId = 3821,
+            TileHue = 33,
+            TileX = 4,
+            TileY = 5,
+        }));
+
+        Assert.Contains(
+            "GFAddImageTileButton(g, 0, 0, 1, 2, GF_CLOSE_BTN, 3, 3821, 33, 4, 5);",
+            script,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain("GFAddButton", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ATooltipUsesGfTooltip()
+    {
+        string script = Package(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            TooltipClilocId = 1042971,
+            TooltipArguments = "Bob@42",
+        }));
+
+        Assert.Contains("GFTooltip(g, 1042971, \"Bob@42\");", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>An argument-less tooltip drops the parameter entirely.</summary>
+    [Fact]
+    public void AnArgumentLessTooltipPassesOnlyItsCliloc()
+    {
+        string script = Package(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            TooltipClilocId = 1042971,
+        }));
+
+        Assert.Contains("GFTooltip(g, 1042971);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnItemPropertyUsesGfItemProperty()
+    {
+        string script = Package(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            ItemPropertySerial = 1073741825,
+        }));
+
+        Assert.Contains("GFItemProperty(g, 1073741825);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APlainLocalizedHtmlAreaPassesNeitherColourNorArguments()
+    {
+        string script = Package(WithElement(new HtmlElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(200, 60),
+            ContentKind = HtmlContentKind.Localized,
+            ClilocId = 1049004,
+        }));
+
+        Assert.Contains(
+            "GFAddHTMLLocalized(g, 0, 0, 200, 60, 1049004);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AColouredLocalizedHtmlAreaForwardsItsColour()
+    {
+        string script = Package(WithElement(new HtmlElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(200, 60),
+            ContentKind = HtmlContentKind.Localized,
+            ClilocId = 1049004,
+            ShowBackground = true,
+            Color = 32767,
+        }));
+
+        // A hue with no custom string is what makes the package pick
+        // XMFHTMLGumpColor.
+        Assert.Contains(
+            "GFAddHTMLLocalized(g, 0, 0, 200, 60, 1049004, 1, 0, 32767, \"\");",
+            script,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The arguments go through raw. The package wraps them in <c>@…@</c> itself,
+    /// and it is the custom string that makes it pick <c>XmfHtmlTok</c> — whose
+    /// parameter order differs — so neither is the converter's to decide.
+    /// </summary>
+    [Fact]
+    public void ATokenisedLocalizedHtmlAreaForwardsUnwrappedArguments()
+    {
+        string script = Package(WithElement(new HtmlElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(200, 60),
+            ContentKind = HtmlContentKind.Localized,
+            ClilocId = 1049004,
+            ShowBackground = true,
+            ShowScrollbar = true,
+            Color = 32767,
+            Arguments = "Bob@42",
+        }));
+
+        Assert.Contains(
+            "GFAddHTMLLocalized(g, 0, 0, 200, 60, 1049004, 1, 1, 32767, \"Bob@42\");",
+            script,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain("@Bob@42@", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>GFGumpPic</c> grew a trailing flag for the partial form, which tints
+    /// only the grayscale pixels. Before it, the command could not be expressed
+    /// at all and a dyeable graphic exported flattened to one shade.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "GFGumpPic(g, 0, 0, 55, 33);")]
+    [InlineData(true, "GFGumpPic(g, 0, 0, 55, 33, 1);")]
+    public void AnImagePassesThePartialFlagOnlyWhenItNeedsIt(bool partial, string expected)
+    {
+        string script = Package(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            Hue = 33,
+            PartialHue = partial,
+        }));
+
+        Assert.Contains(expected, script, StringComparison.Ordinal);
+        Assert.DoesNotContain("XGFAddToLayout", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>A partial flag means nothing with no hue to apply.</summary>
+    [Fact]
+    public void AnUnhuedImageNeverPassesThePartialFlag()
+    {
+        string script = Package(WithElement(new ImageElement
+        {
+            Location = GumpPoint.Origin,
+            GumpId = 55,
+            PartialHue = true,
+        }));
+
+        Assert.Contains("GFGumpPic(g, 0, 0, 55, 0);", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// <c>GFAddButton</c> replaces a value below one with the next free id, so a
+    /// page-0 target exported as a call became a jump to an arbitrary page — and
+    /// disagreed with what the layout-strings dialect said about the same button.
+    /// </summary>
+    [Fact]
+    public void APageZeroButtonIsAppendedBecauseThePackageWouldReassignIt()
+    {
+        string script = Package(WithElement(new ButtonElement
+        {
+            Location = GumpPoint.Origin,
+            NormalId = 1,
+            PressedId = 2,
+            Kind = ButtonKind.Page,
+            Param = 0,
+        }));
+
+        Assert.Contains(
+            "//GFAddButton would assign an id of its own; written out as a layout string.",
+            script,
+            StringComparison.Ordinal);
+
+        // XGFAddToLayout is the package's own escape hatch, in preference to
+        // reaching into gump.layout from generated code.
+        Assert.Contains(
+            "XGFAddToLayout(g, \"button 0 0 1 2 0 0 0\");", script, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("GFAddButton(g,", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AZeroValuedCheckboxAndRadioAreAppendedForTheSameReason()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new CheckboxElement
+        {
+            Location = GumpPoint.Origin,
+            UncheckedId = 210,
+            CheckedId = 211,
+            GroupId = 0,
         });
 
-        string script = PolScriptBuilder.Build(document, "g", null, Stamp);
+        document.Pages[0].Root.Add(new RadioElement
+        {
+            Location = new GumpPoint(0, 20),
+            UncheckedId = 208,
+            CheckedId = 209,
+            Value = 0,
+        });
 
-        Assert.Contains("//Gump package does not support picinpic", script, StringComparison.Ordinal);
-        Assert.Contains("//picinpic 0 0 9000 4 5 20 30", script, StringComparison.Ordinal);
+        string script = Package(document);
+
+        Assert.Contains(
+            "XGFAddToLayout(g, \"checkbox 0 0 210 211 0 0\");", script, StringComparison.Ordinal);
+
+        Assert.Contains(
+            "XGFAddToLayout(g, \"radio 0 20 208 209 0 0\");", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The id cannot be preserved by writing the command out: unlike a button or a
+    /// checkbox it carries text, and this dialect has no data array for a layout
+    /// string to index into. So the export says what will happen.
+    /// </summary>
+    [Fact]
+    public void AZeroEntryIdIsNotedRatherThanAppended()
+    {
+        string script = Package(WithElement(new TextEntryElement
+        {
+            Location = GumpPoint.Origin,
+            Size = new GumpSize(120, 20),
+            EntryId = 0,
+        }));
+
+        Assert.Contains(
+            "//GFTextEntry assigns an id of its own; this one was left at 0.",
+            script,
+            StringComparison.Ordinal);
+
+        Assert.Contains("GFTextEntry(g, 0, 0, 120, 20, 0, \"TextEntry\", 0);", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GumpLevelCommandsUseTheirOwnCalls()
+    {
+        GumpDocument document = new();
+
+        Assert.DoesNotContain("GFMasterGump", Package(document), StringComparison.Ordinal);
+
+        document.Properties.MasterGumpId = 3000;
+        document.Properties.UpperWordCase = true;
+        document.Properties.CroppedText = true;
+        document.Properties.EnhancedClientInput = true;
+
+        string script = Package(document);
+
+        Assert.Contains("GFMasterGump(g, 3000);", script, StringComparison.Ordinal);
+        Assert.Contains("GFToggleUpperWordCase(g);", script, StringComparison.Ordinal);
+        Assert.Contains("GFToggleCroppedText(g);", script, StringComparison.Ordinal);
+        Assert.Contains("GFECHandleInput(g);", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("XGFAddToLayout", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A group that is never closed does not work on pages above the first, which
+    /// is what made <c>GFSetRadioGroup</c> look page-1-only. The package now has
+    /// the call that closes one.
+    /// </summary>
+    [Fact]
+    public void AnEndGroupUsesGfEndRadioGroup()
+    {
+        GumpDocument document = new();
+
+        document.Pages[0].Root.Add(new RadioElement { GroupId = 3, Value = 1 });
+
+        string script = Package(document);
+
+        Assert.Contains("GFSetRadioGroup(g, 3);", script, StringComparison.Ordinal);
+        Assert.Contains("GFEndRadioGroup(g);", script, StringComparison.Ordinal);
     }
 }

@@ -308,6 +308,7 @@ internal static class Program
             {
                 GumpName = options.Name ?? "MyGump",
                 Dialect = dialect,
+                PlaceholderText = !options.NoPlaceholders,
             });
 
         if (options.Output is null)
@@ -451,6 +452,10 @@ internal static class Program
                     i++;
                     break;
 
+                case "--no-placeholders":
+                    options = options with { NoPlaceholders = true };
+                    break;
+
                 case "--page" when value is not null:
                     options = options with { Page = ParseId(value) };
                     i++;
@@ -490,7 +495,7 @@ internal static class Program
               gumpstudio render --client <path> --in <file.gump> [--page <n>] [--out <file.png>]
               gumpstudio sample [--out <file.gump>]
               gumpstudio export --in <file.gump> [--format <id>] [--dialect <id>]
-                                [--name <n>] [--out <file>]
+                                [--name <n>] [--no-placeholders] [--out <file>]
               gumpstudio import [--in <file.txt>] [--out <file.gump>]
 
             Export formats, with their dialects:
@@ -498,6 +503,7 @@ internal static class Program
               pol      POL script            gump-package (default) | layout-strings
               runuo    RunUO / ServUO C#     named (default) | numeric
               sphere   Sphere script         056 (default) | 099
+              uox3     UOX3 JavaScript
 
             The earlier ids still work: pol-layout, runuo-numeric, sphere-056 and
             sphere-099 select the same converter and dialect as before.
@@ -525,5 +531,6 @@ internal static class Program
         int Page = 0,
         string? Format = null,
         string? Name = null,
-        string? Dialect = null);
+        string? Dialect = null,
+        bool NoPlaceholders = false);
 }

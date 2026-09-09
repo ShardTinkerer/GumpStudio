@@ -109,6 +109,18 @@ public sealed record GumpExportOptions
     public bool IncludeComments { get; init; } = true;
 
     /// <summary>
+    /// Whether an empty string is written as a named placeholder rather than as
+    /// an empty one, where the target leaves that a free choice.
+    /// </summary>
+    /// <remarks>
+    /// POL's is a free choice: an empty entry in its data array is a harmless
+    /// <c>""</c>. Sphere's is not, and ignores this — its text block is
+    /// positional, one line per slot, so an empty line would sit in a script
+    /// section as a blank. The placeholder is load-bearing there.
+    /// </remarks>
+    public bool PlaceholderText { get; init; } = true;
+
+    /// <summary>
     /// Which of the converter's dialects to emit, or null for its default.
     /// </summary>
     public string? Dialect { get; init; }

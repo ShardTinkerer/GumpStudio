@@ -19,6 +19,25 @@ public sealed record LayoutStringOptions
     public string GroupKeyword { get; init; } = "group";
 
     /// <summary>
+    /// Whether a full tint is written as <c>gumppichued</c> rather than as
+    /// <c>gumppic</c> with a trailing hue.
+    /// </summary>
+    /// <remarks>
+    /// The client needs the explicit command: its <c>gumppic</c> handler takes
+    /// three positional values and then skips any token that is not
+    /// <c>key=value</c>, so a bare fourth number is lost and the art renders
+    /// untinted.
+    /// <para>
+    /// Sphere is the exception, because it is not a pass-through: it parses these
+    /// lines itself and re-emits them, and its <c>GUMPPIC</c> handler turns a
+    /// trailing token into the <c>hue=</c> form the client does read. It has no
+    /// <c>GUMPPICHUED</c> key at all, so there the bare form is both the
+    /// understood one and the correct one.
+    /// </para>
+    /// </remarks>
+    public bool HuedGumpPicCommand { get; init; } = true;
+
+    /// <summary>
     /// Whether a page's open radio group is closed at its end.
     /// </summary>
     /// <remarks>
@@ -45,8 +64,9 @@ public sealed record LayoutStringOptions
 /// <para>
 /// Text slots are resolved by a caller-supplied function rather than baked in. A
 /// dialect with a data array passes the slot index; one that writes strings
-/// inline passes the string; and the gump package's notes pass a literal
-/// <c>0</c>, because that output has no array for an index to point into.
+/// inline passes the string; and the lines the gump-package dialect appends pass
+/// a literal <c>0</c>, because that output has no array for an index to point
+/// into.
 /// </para>
 /// </remarks>
 public static class LayoutStringWriter
@@ -135,7 +155,7 @@ public static class LayoutStringWriter
             GumpPicTiledCommand c =>
                 Invariant($"gumppictiled {c.X} {c.Y} {c.Width} {c.Height} {c.GumpId}"),
 
-            GumpPicCommand c => GumpPic(c),
+            GumpPicCommand c => GumpPic(c, options),
 
             PicInPicCommand c => PicInPic(c),
 
@@ -184,13 +204,28 @@ public static class LayoutStringWriter
     /// A gump image, tinted fully, tinted partially, or plain.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// A full tint is <c>gumppichued</c>, never <c>gumppic</c> with a fourth
+    /// number. The client's <c>gumppic</c> handler reads exactly three positional
+    /// values and then requires every remaining token to be <c>key=value</c>: the
+    /// splitter returns early when it finds no <c>=</c>, and only a key of
+    /// <c>hue</c> assigns one. A bare trailing hue is therefore skipped in
+    /// silence and the art renders untinted, which is what every dialect that
+    /// speaks layout strings used to emit. Confirmed by decompiling
+    /// <c>parseGumpDefinition</c>; <c>gumppic … hue=22</c> works too, but the
+    /// explicit command needs no keyword syntax and matches the other two arms.
+    /// </para>
+    /// <para>
     /// <c>gumppicphued</c> tints only the grayscale pixels, which is what dyeable
     /// art needs; the plain hued form flattens the graphic to a single shade.
+    /// </para>
     /// </remarks>
-    private static string GumpPic(GumpPicCommand c) => c switch
+    private static string GumpPic(GumpPicCommand c, LayoutStringOptions options) => c switch
     {
         { Hue: 0 } => Invariant($"gumppic {c.X} {c.Y} {c.GumpId}"),
         { PartialHue: true } => Invariant($"gumppicphued {c.X} {c.Y} {c.GumpId} {c.Hue}"),
+        _ when options.HuedGumpPicCommand =>
+            Invariant($"gumppichued {c.X} {c.Y} {c.GumpId} {c.Hue}"),
         _ => Invariant($"gumppic {c.X} {c.Y} {c.GumpId} {c.Hue}"),
     };
 

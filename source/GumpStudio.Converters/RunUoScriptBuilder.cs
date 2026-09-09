@@ -91,10 +91,19 @@ public sealed record RunUoExportOptions
 /// </list>
 /// <para>
 /// Elements the client only gained after 1.8 map onto the calls modern cores
-/// provide: <c>AddImageTiledButton</c>, <c>AddTooltip</c>, <c>AddItemProperty</c>,
-/// <c>AddLabelCropped</c>, <c>AddPicInPic</c>, <c>AddMasterGump</c> and
-/// <c>AddECHandleInput</c>. The last four need a ServUO-era core; RunUO 2.x does
-/// not define them.
+/// provide: <c>AddImageTiledButton</c>, <c>AddItemProperty</c>,
+/// <c>AddLabelCropped</c>, <c>AddGroup</c>, <c>AddSpriteImage</c> and
+/// <c>AddECHandleInput</c>, all of which need a ServUO-era core.
+/// </para>
+/// <para>
+/// Three do not exist to be called, checked by compiling this converter's output
+/// against a from-source build of ServUO Pub 57. <c>AddMasterGump</c> and
+/// anything for <c>tilepicasgumppic</c> are in no RunUO or ServUO core at all —
+/// ModernUO spells the first <c>AddGumpIDOverride</c> — and ServUO's
+/// two-argument <c>AddTooltip</c> is commented out in its own source, so a
+/// tooltip's arguments cannot be passed. Earlier versions emitted
+/// <c>AddMasterGump</c>, <c>AddPicInPic</c> and the two-argument
+/// <c>AddTooltip</c>; none of the three compiles.
 /// </para>
 /// </remarks>
 public static class RunUoScriptBuilder
@@ -239,8 +248,10 @@ public static class RunUoScriptBuilder
 
         if (properties.MasterGumpId != 0)
         {
+            // No RunUO or ServUO core defines AddMasterGump. ModernUO has the
+            // command as AddGumpIDOverride, which is not the API this targets.
             script.AppendLine(CultureInfo.InvariantCulture,
-                $"{line}AddMasterGump({properties.MasterGumpId});");
+                $"{line}// No core call for mastergump {properties.MasterGumpId} (ModernUO: AddGumpIDOverride).");
         }
 
         if (properties.EnhancedClientInput)
@@ -331,9 +342,20 @@ public static class RunUoScriptBuilder
                     : Invariant($"AddImage({c.X}, {c.Y}, {c.GumpId});");
                 break;
 
+            // AddSpriteImage is the call in both ServUO and ModernUO; no core has
+            // ever had an AddPicInPic, which is what this used to emit.
+            //
+            // Both cores then write this command's width and height into the two
+            // slots the client reads as the source offset, and vice versa. The
+            // call is emitted the way its signature means it, so it comes out
+            // right the moment a core fixes that, and the note says why the
+            // region looks wrong until one does.
             case PicInPicCommand c:
+                yield return
+                    "// ServUO and ModernUO transpose width/height with sx/sy here on the wire.";
+
                 yield return Invariant(
-                    $"AddPicInPic({c.X}, {c.Y}, {c.GumpId}, {c.Width}, {c.Height}, {c.SourceX}, {c.SourceY});");
+                    $"AddSpriteImage({c.X}, {c.Y}, {c.GumpId}, {c.Width}, {c.Height}, {c.SourceX}, {c.SourceY});");
                 break;
 
             case TilePicCommand c:
@@ -391,17 +413,33 @@ public static class RunUoScriptBuilder
 
             // Both attach to the element the core created last, so they follow it.
             case TooltipCommand c:
-                yield return c.Arguments.Length > 0
-                    ? Invariant($"AddTooltip({c.ClilocId}, {Literal(c.Arguments)});")
-                    : Invariant($"AddTooltip({c.ClilocId});");
+                if (c.Arguments.Length > 0)
+                {
+                    // ServUO carries a two-argument AddTooltip commented out in
+                    // its own source, so the arguments have nowhere to go. The
+                    // cliloc still renders; only its substitutions are lost.
+                    yield return Invariant(
+                        $"// Tooltip arguments dropped, no core overload takes them: {Literal(c.Arguments)}");
+                }
+
+                yield return Invariant($"AddTooltip({c.ClilocId});");
                 break;
 
             case ItemPropertyCommand c:
                 yield return Invariant($"AddItemProperty({c.Serial});");
                 break;
 
-            case GroupCommand:
+            // ServUO and ModernUO both have AddGroup. Skipping it, as this
+            // converter used to, left every radio on a page in one group, so
+            // buttons that should have been mutually exclusive were not.
+            case GroupCommand c:
+                yield return Invariant($"AddGroup({c.Group});");
+                break;
+
             case EndGroupCommand:
+                // No core call closes a group, so a group id reused on a later
+                // page is the one thing the client needs endgroup for and cannot
+                // get here.
                 break;
 
             default:

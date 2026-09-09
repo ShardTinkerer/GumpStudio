@@ -20,6 +20,7 @@ public static class GumpConverters
         new PolConverter(),
         new RunUoConverter(),
         new SphereConverter(),
+        new UoxConverter(),
     ];
 
     /// <summary>Finds a converter by its id, or null.</summary>
@@ -85,6 +86,7 @@ public sealed class PolConverter : IGumpConverter
                 : PolScriptStyle.GumpPackage,
             IncludeComments = options.IncludeComments,
             IncludeNames = options.IncludeComments,
+            PlaceholderText = options.PlaceholderText,
         });
     }
 }
@@ -157,6 +159,30 @@ public sealed class SphereConverter : IGumpConverter
                 ? SphereDialect.Modern
                 : SphereDialect.Revision,
             DialogName = options.GumpName,
+            IncludeComments = options.IncludeComments,
+        });
+    }
+}
+
+/// <summary>UOX3, as a JavaScript gump script.</summary>
+public sealed class UoxConverter : IGumpConverter
+{
+    public string Id => "uox3";
+
+    public string DisplayName => "UOX3 script";
+
+    public string FileExtension => ".js";
+
+    /// <summary>None: UOX3 has one gump API.</summary>
+    public IReadOnlyList<ConverterDialect> Dialects => [];
+
+    public string Convert(GumpLayout layout, GumpExportOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return UoxScriptBuilder.Build(layout, new UoxExportOptions
+        {
+            FunctionName = options.GumpName,
             IncludeComments = options.IncludeComments,
         });
     }
