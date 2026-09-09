@@ -7,7 +7,7 @@ Built on **.NET 10** with an **Avalonia** UI, running on Windows, Linux and
 macOS. It reads both classic `.mul` and modern `.uop` client data, so it works
 with clients from 2001 through to current. You can place elements, edit their
 properties, save, import a gump captured off the wire, and export raw client
-layout, POL, RunUO and Sphere.
+layout, POL, RunUO, Sphere and UOX3.
 
 > Not everything the 2004 application could do is here yet.
 > [docs/architecture.md](docs/architecture.md) lists the known gaps.
@@ -37,7 +37,7 @@ it. Any client from 2001 onward should work; it tells you what is missing if a
 folder is not usable.
 
 There is also a headless CLI for the same data layer — inspecting a client,
-writing art to PNG, rendering a saved document, and running the four export
+writing art to PNG, rendering a saved document, and running the five export
 converters without the UI:
 
 ```sh

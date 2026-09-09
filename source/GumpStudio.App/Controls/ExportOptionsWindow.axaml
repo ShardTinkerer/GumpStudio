@@ -26,6 +26,7 @@
     </Grid>
 
     <CheckBox Name="CommentsBox" Content="Include element names and comments" />
+    <CheckBox Name="PlaceholdersBox" Content="Name empty strings rather than leaving them blank" />
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
       <Button Name="CancelButton" Content="Cancel" MinWidth="80" />

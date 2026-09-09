@@ -306,8 +306,10 @@ public static class LayoutStringParser
 
                 return null;
 
-            // The client accepts a bare hue on gumppic as well as the explicit
-            // hued form, and both mean a full tint.
+            // A bare fourth number on gumppic is read as a full tint because
+            // other tools emit it and the intent is unambiguous. The client
+            // itself ignores it — see LayoutStringWriter.GumpPic — so it is
+            // never written back out that way.
             case "gumppic" when numbers.Length >= 3:
             case "gumppichued" when numbers.Length >= 4:
                 commands.Add(new GumpPicCommand(

@@ -90,7 +90,7 @@ legacy `.mul` pair is the fallback, because modern clients ship no
 - **XML over an explicit DTO layer**, hand-written rather than reflection-based,
   so renaming a class never breaks a saved file.
 
-## Export: one layout, four converters
+## Export: one layout, five converters
 
 Exporting is two steps, and the split between them is the point.
 
@@ -98,7 +98,8 @@ Exporting is two steps, and the split between them is the point.
 GumpDocument ──► GumpLayoutBuilder ──► GumpLayout ──┬─► LayoutConverter
                  the only caller of                 ├─► PolConverter
                  GetAbsolutePosition()               ├─► RunUoConverter
-                                                     └─► SphereConverter
+                                                     ├─► SphereConverter
+                                                     └─► UoxConverter
 ```
 
 **`GumpLayout` carries meaning; a converter owns syntax.** The IR is the client's
@@ -106,14 +107,15 @@ own command table — `resizepic`, `gumppic`, `button`, `tooltip` and the rest �
 with absolute coordinates, page boundaries, radio-group scoping, text-slot
 allocation and tooltip ordering already settled. A converter decides only how its
 target spells that: POL escapes for quoted strings, RunUO for C# verbatim
-literals, Sphere for line-based tokens, and the same flag is `NOCLOSE` in Sphere
-0.56, `NoClose` in 0.99 and in POL.
+literals, Sphere for line-based tokens, UOX3 for JavaScript, and the same flag is
+`NOCLOSE` in Sphere 0.56, `NoClose` in 0.99 and in POL, `Dragable = false` in
+RunUO and `NoMove()` in UOX3.
 
 Before this, each exporter walked the document itself. That meant three page
 loops, three radio-group trackers, three text-slot allocators, and three element
 `switch`es with a `default` arm that silently skipped anything new — and the
 client's layout grammar hand-written **four** times, because the two dialects that
-do not emit it still build it for the notes they leave beside commands they
+do not emit it still build it for the lines they leave beside commands they
 cannot express. The same defects then had to be found and fixed once per
 exporter: the nested-group coordinate bug, the locale-sensitive number
 formatting and the cross-page radio-group leak were each repaired three times
@@ -131,8 +133,8 @@ Two details are load-bearing:
   per command. Keying that on the command value would collapse two genuinely
   distinct commands that happen to be identical.
 - **Text slots are late-bound.** The same string reaches output as a table index,
-  as an inline literal, or as a literal `0` in the gump package's notes, which
-  have no data array for an index to point into.
+  as an inline literal, or as a literal `0` in the layout lines the POL gump
+  package's dialect appends, which have no data array for an index to point into.
 
 ## Import: the same pipeline backwards
 

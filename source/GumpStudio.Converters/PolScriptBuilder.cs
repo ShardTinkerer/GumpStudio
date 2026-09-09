@@ -75,6 +75,11 @@ public sealed record PolExportOptions
 /// Numbers format invariantly and the header timestamp is injectable, so two
 /// exports of one gump are byte-identical and can be diffed.
 /// </item>
+/// <item>
+/// The gump-package dialect emits a <c>GF*</c> call for every command in the
+/// client's table, where the original knew only the element set of its day. That
+/// needs a current <c>:gumps:gumps</c>; the layout-string dialect stays portable.
+/// </item>
 /// </list>
 /// </remarks>
 public static class PolScriptBuilder
@@ -173,9 +178,27 @@ public static class PolScriptBuilder
             body.Add($"GFDisposable({name}, 0);");
         }
 
-        foreach (string token in LayoutStringWriter.GumpLevelTokens(layout.Properties))
+        // The four commands LayoutStringWriter.GumpLevelTokens spells for the
+        // layout-string dialects. The conditions are repeated rather than shared
+        // because this dialect needs the call, not the token.
+        if (layout.Properties.MasterGumpId != 0)
         {
-            Unsupported(body, token);
+            body.Add(Invariant($"GFMasterGump({name}, {layout.Properties.MasterGumpId});"));
+        }
+
+        if (layout.Properties.UpperWordCase)
+        {
+            body.Add($"GFToggleUpperWordCase({name});");
+        }
+
+        if (layout.Properties.CroppedText)
+        {
+            body.Add($"GFToggleCroppedText({name});");
+        }
+
+        if (layout.Properties.EnhancedClientInput)
+        {
+            body.Add($"GFECHandleInput({name});");
         }
 
         foreach (LayoutCommand command in layout.Commands)
@@ -186,7 +209,7 @@ public static class PolScriptBuilder
 
         StringBuilder script = new();
 
-        AppendHeader(script, timestamp, "for gump pkg");
+        AppendHeader(script, timestamp, "for gump pkg", layout.Properties.TypeId);
         script.AppendLine("use uo;");
         script.AppendLine("use os;");
         script.AppendLine();
@@ -212,12 +235,18 @@ public static class PolScriptBuilder
     /// Emits one command as a gump-package call.
     /// </summary>
     /// <remarks>
-    /// The package has a <c>GF*</c> function for the original element set only.
-    /// Where a command has no function at all, or where only a refinement is
-    /// missing — a partial hue, a crop rectangle, a character cap, tile art on a
-    /// button — the layout-string form is written out as a note beside the
-    /// nearest call. Dropping the command instead would delete a visible element
-    /// from the gump, which is a far worse answer than drawing it slightly wrong.
+    /// <para>
+    /// Every command has a call. Some had been in the package for years and the
+    /// 1.8 exporter did not know them — <c>GFPicTiled</c>, <c>GFTextCrop</c>,
+    /// <c>GFTooltip</c>, <c>GFItemProperty</c>, <c>GFAddImageTileButton</c>, and
+    /// the trailing parameters on <c>GFTextEntry</c> and
+    /// <c>GFAddHTMLLocalized</c> — so it commented the command out or emitted a
+    /// lossy near-miss. The rest did not exist and were added to the package.
+    /// </para>
+    /// <para>
+    /// The exception is a value the package would renumber, which
+    /// <see cref="RawLayout"/> writes out as a layout string instead.
+    /// </para>
     /// </remarks>
     private static void AppendGumpPackageCommand(
         List<string> body,
@@ -242,8 +271,10 @@ public static class PolScriptBuilder
                 break;
 
             case EndGroupCommand:
-                // The gump package tracks the group as per-gump state and has no
-                // call that closes one.
+                // Not optional, though the package went years without a call for
+                // it: a group that is never closed does not work on pages above
+                // the first, which is what made GFSetRadioGroup look page-1-only.
+                body.Add(Invariant($"GFEndRadioGroup({name});"));
                 break;
 
             case CheckerTransCommand c:
@@ -256,15 +287,20 @@ public static class PolScriptBuilder
                     Invariant($"{c.Width}, {c.Height});")));
                 break;
 
+            case GumpPicTiledCommand c:
+                body.Add(Concat(
+                    Invariant($"GFPicTiled({name}, {c.X}, {c.Y}, "),
+                    Invariant($"{c.Width}, {c.Height}, {c.GumpId});")));
+                break;
+
+            // The trailing flag selects the partial form, which tints only the
+            // grayscale pixels. Without it dyeable art flattens to one shade.
+            case GumpPicCommand { PartialHue: true, Hue: not 0 } c:
+                body.Add(Invariant($"GFGumpPic({name}, {c.X}, {c.Y}, {c.GumpId}, {c.Hue}, 1);"));
+                break;
+
             case GumpPicCommand c:
                 body.Add(Invariant($"GFGumpPic({name}, {c.X}, {c.Y}, {c.GumpId}, {c.Hue});"));
-
-                // GFGumpPic always applies a full tint.
-                if (c is { PartialHue: true, Hue: not 0 })
-                {
-                    Unsupported(body, command);
-                }
-
                 break;
 
             case TilePicCommand c:
@@ -276,18 +312,15 @@ public static class PolScriptBuilder
                 break;
 
             case CroppedTextCommand c:
-                body.Add(GfTextLine(name, c, layout, options));
-
-                // GFTextLine has no crop rectangle.
-                Unsupported(body, command);
+                body.Add(GfTextCrop(name, c, layout, options));
                 break;
 
             case TextEntryCommand c:
                 body.Add(GfTextEntry(name, c, layout, options));
 
-                if (c.MaxLength > 0)
+                if (c.EntryId <= 0)
                 {
-                    Unsupported(body, command);
+                    Reassigned(body, "GFTextEntry");
                 }
 
                 break;
@@ -298,26 +331,35 @@ public static class PolScriptBuilder
 
             case XmfHtmlCommand c:
                 body.Add(GfHtmlLocalized(name, c));
+                break;
 
-                // GFAddHTMLLocalized takes neither a colour nor cliloc arguments.
-                if (c.Color != 0 || c.Arguments.Length > 0)
-                {
-                    Unsupported(body, command);
-                }
+            // GFAddButton, GFCheckBox and GFRadioButton all replace a value below
+            // one with the next free id, so a page-0 target or a zero response
+            // survives only if the command is written out directly. None of the
+            // three carries text, so the layout string is exact.
+            case ButtonCommand { Param: <= 0 }:
+                RawLayout(body, name, command, "GFAddButton would assign an id of its own");
+                break;
 
+            case CheckboxCommand { Group: <= 0 }:
+                RawLayout(body, name, command, "GFCheckBox would assign an id of its own");
+                break;
+
+            case RadioCommand { Value: <= 0 }:
+                RawLayout(body, name, command, "GFRadioButton would assign an id of its own");
+                break;
+
+            case ButtonCommand { Tile: { } tile } c:
+                body.Add(Concat(
+                    Invariant($"GFAddImageTileButton({name}, {c.X}, {c.Y}, {c.NormalId}, {c.PressedId}, "),
+                    Invariant($"{ButtonType(c)}, {c.Param}, "),
+                    Invariant($"{tile.ItemId}, {tile.Hue}, {tile.X}, {tile.Y});")));
                 break;
 
             case ButtonCommand c:
                 body.Add(Concat(
                     Invariant($"GFAddButton({name}, {c.X}, {c.Y}, {c.NormalId}, {c.PressedId}, "),
-                    Invariant($"{(c.Kind == ButtonKind.Page ? "GF_PAGE_BTN" : "GF_CLOSE_BTN")}, "),
-                    Invariant($"{c.Param});")));
-
-                if (c.Tile is not null)
-                {
-                    Unsupported(body, command);
-                }
-
+                    Invariant($"{ButtonType(c)}, {c.Param});")));
                 break;
 
             case RadioCommand c:
@@ -332,13 +374,27 @@ public static class PolScriptBuilder
                     Invariant($"{Flag(c.IsChecked)}, {c.Group});")));
                 break;
 
-            // No package call at all for these.
-            case GumpPicTiledCommand:
-            case PicInPicCommand:
-            case TileAsGumpPicCommand:
-            case TooltipCommand:
-            case ItemPropertyCommand:
-                Unsupported(body, command);
+            case TooltipCommand c:
+                body.Add(c.Arguments.Length > 0
+                    ? Invariant($"GFTooltip({name}, {c.ClilocId}, \"{Escape(c.Arguments)}\");")
+                    : Invariant($"GFTooltip({name}, {c.ClilocId});"));
+                break;
+
+            case ItemPropertyCommand c:
+                body.Add(Invariant($"GFItemProperty({name}, {c.Serial});"));
+                break;
+
+            case PicInPicCommand c:
+                body.Add(Concat(
+                    Invariant($"GFPicInPic({name}, {c.X}, {c.Y}, {c.GumpId}, "),
+                    Invariant($"{c.SourceX}, {c.SourceY}, {c.Width}, {c.Height}, "),
+                    Invariant($"{c.Hue}, {Flag(c.PartialHue)});")));
+                break;
+
+            case TileAsGumpPicCommand c:
+                body.Add(Concat(
+                    Invariant($"GFTilePicAsGumpPic({name}, {c.X}, {c.Y}, {c.ItemId}, "),
+                    Invariant($"{c.LinkId}, {c.ParamB}, {c.ParamC});")));
                 break;
 
             default:
@@ -379,7 +435,7 @@ public static class PolScriptBuilder
 
         StringBuilder script = new();
 
-        AppendHeader(script, timestamp, null);
+        AppendHeader(script, timestamp, null, layout.Properties.TypeId);
         script.AppendLine("use uo;");
         script.AppendLine("use os;");
         script.AppendLine();
@@ -404,30 +460,47 @@ public static class PolScriptBuilder
     }
 
     /// <summary>
-    /// Records a command the gump package has no function for.
+    /// Writes a command out as a layout string, with a note saying why it looks
+    /// unlike its neighbours.
     /// </summary>
     /// <remarks>
-    /// The note is the client's own layout string, formatted by the shared
-    /// writer. Text slots resolve to <c>0</c> rather than to their real index,
-    /// because this output has no data array for an index to point into.
+    /// <para>
+    /// Only for the commands whose id the package would overwrite:
+    /// <c>GFAddButton</c>, <c>GFCheckBox</c> and <c>GFRadioButton</c> replace a
+    /// value below one with the next free id, so a page-0 target or a zero
+    /// response cannot go through the call at all. Everything else the package
+    /// has a function for, and the exporter uses it.
+    /// </para>
+    /// <para>
+    /// <c>XGFAddToLayout</c> is the package's own escape hatch, in preference to
+    /// reaching into <c>gump.layout</c> from generated code. The line itself comes
+    /// from the shared writer, so the grammar stays defined in one place, and text
+    /// slots resolve to <c>0</c>: nothing reaching here carries text, and this
+    /// dialect writes its strings inline with no data array for an index to point
+    /// into.
+    /// </para>
     /// </remarks>
-    private static void Unsupported(List<string> body, LayoutCommand command)
+    private static void RawLayout(
+        List<string> body, string name, LayoutCommand command, string reason)
     {
         if (LayoutStringWriter.Format(command, Layout, LayoutStringWriter.AsZero) is { } line)
         {
-            Unsupported(body, line);
+            body.Add(Invariant($"//{reason}; written out as a layout string."));
+            body.Add(Invariant($"XGFAddToLayout({name}, \"{Escape(line)}\");"));
         }
     }
 
-    private static void Unsupported(List<string> body, string layoutCommand)
-    {
-        string command = layoutCommand.Split(' ', 2)[0];
-
-        body.Add(string.Empty);
-        body.Add(Invariant($"//Gump package does not support {command}"));
-        body.Add("//" + layoutCommand);
-        body.Add(string.Empty);
-    }
+    /// <summary>
+    /// Notes an id the package is going to overwrite.
+    /// </summary>
+    /// <remarks>
+    /// <c>GFTextEntry</c> replaces an id below one with the next free slot. Unlike
+    /// a button or a checkbox the command cannot be written out directly instead,
+    /// because it carries text and this dialect has no data array for a layout
+    /// string to index into, so the export says so rather than looking exact.
+    /// </remarks>
+    private static void Reassigned(List<string> body, string function) =>
+        body.Add(Invariant($"//{function} assigns an id of its own; this one was left at 0."));
 
     private static void AppendArray(StringBuilder script, string name, List<string> values)
     {
@@ -442,13 +515,31 @@ public static class PolScriptBuilder
         script.AppendLine("\t};");
     }
 
-    private static void AppendHeader(StringBuilder script, DateTimeOffset? timestamp, string? suffix)
+    /// <summary>
+    /// Writes the header, naming the gump id the design was captured under when
+    /// it has one.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GumpProperties.TypeId"/> is read by the importer out of a
+    /// capture tool's header and was then dropped by every converter. It is not a
+    /// layout command and <c>SendDialogGump</c> takes no id, so a comment is the
+    /// only place it can go: this documents which gump the script rebuilds rather
+    /// than round-tripping, since a POL script is not itself importable.
+    /// </remarks>
+    private static void AppendHeader(
+        StringBuilder script, DateTimeOffset? timestamp, string? suffix, int typeId)
     {
         string stamp = (timestamp ?? DateTimeOffset.Now).ToString("u", CultureInfo.InvariantCulture);
 
         script.AppendLine(CultureInfo.InvariantCulture, $"// Created {stamp}, with Gump Studio.");
         script.AppendLine(CultureInfo.InvariantCulture,
             $"// Exported with {PluginName} ver {PluginVersion}{(suffix is null ? string.Empty : " " + suffix)}");
+
+        if (typeId != 0)
+        {
+            script.AppendLine(CultureInfo.InvariantCulture, $"// Gump 0x{typeId:X}");
+        }
+
         script.AppendLine();
     }
 
@@ -529,15 +620,28 @@ public static class PolScriptBuilder
         string name, TextCommand c, GumpLayout layout, PolExportOptions options) =>
         Invariant($"GFTextLine({name}, {c.X}, {c.Y}, {c.Hue}, \"{Escape(Inline(c.Text, layout, options))}\");");
 
-    private static string GfTextLine(
+    /// <summary>A cropped label, which owns its rectangle.</summary>
+    /// <remarks>
+    /// The previous version emitted <c>GFTextLine</c> and noted the crop
+    /// rectangle as lost, which drew the label unclipped and at its full width.
+    /// </remarks>
+    private static string GfTextCrop(
         string name, CroppedTextCommand c, GumpLayout layout, PolExportOptions options) =>
-        Invariant($"GFTextLine({name}, {c.X}, {c.Y}, {c.Hue}, \"{Escape(Inline(c.Text, layout, options))}\");");
+        Concat(
+            Invariant($"GFTextCrop({name}, {c.X}, {c.Y}, {c.Width}, {c.Height}, {c.Hue}, "),
+            Invariant($"\"{Escape(Inline(c.Text, layout, options))}\");"));
 
+    /// <summary>An entry field, with its character cap when it has one.</summary>
+    /// <remarks>
+    /// A non-zero cap in the trailing <c>lmt</c> parameter is what selects the
+    /// package's <c>TextEntryLimited</c> form.
+    /// </remarks>
     private static string GfTextEntry(
         string name, TextEntryCommand c, GumpLayout layout, PolExportOptions options) =>
         Concat(
             Invariant($"GFTextEntry({name}, {c.X}, {c.Y}, {c.Width}, {c.Height}, {c.Hue}, "),
-            Invariant($"\"{Escape(Inline(c.Text, layout, options))}\", {c.EntryId});"));
+            Invariant($"\"{Escape(Inline(c.Text, layout, options))}\", {c.EntryId}"),
+            c.MaxLength > 0 ? Invariant($", {c.MaxLength});") : ");");
 
     private static string GfHtmlArea(
         string name, HtmlGumpCommand c, GumpLayout layout, PolExportOptions options)
@@ -551,13 +655,37 @@ public static class PolScriptBuilder
             : Invariant($"GFHTMLArea({name}, {c.X}, {c.Y}, {c.Width}, {c.Height}, \"{text}\");");
     }
 
-    private static string GfHtmlLocalized(string name, XmfHtmlCommand c) =>
-        c.Scrollbar || c.Background
-            ? Concat(
-                Invariant($"GFAddHTMLLocalized({name}, {c.X}, {c.Y}, {c.Width}, {c.Height}, {c.ClilocId}, "),
-                Invariant($"{Flag(c.Background)}, {Flag(c.Scrollbar)});"))
-            : Invariant(
-                $"GFAddHTMLLocalized({name}, {c.X}, {c.Y}, {c.Width}, {c.Height}, {c.ClilocId});");
+    /// <summary>
+    /// A localised HTML area, in whichever of its three forms applies.
+    /// </summary>
+    /// <remarks>
+    /// The package picks the command from the arguments it is handed: a hue alone
+    /// selects <c>XMFHTMLGumpColor</c>, and a custom string selects
+    /// <c>XmfHtmlTok</c>, whose parameter order is genuinely different. So the
+    /// colour and the arguments are forwarded and the branch is left to it, which
+    /// is one fewer place for that ordering to be got wrong. The arguments go
+    /// through raw: the package adds the <c>@...@</c> wrapper itself.
+    /// </remarks>
+    private static string GfHtmlLocalized(string name, XmfHtmlCommand c)
+    {
+        string head = Invariant(
+            $"GFAddHTMLLocalized({name}, {c.X}, {c.Y}, {c.Width}, {c.Height}, {c.ClilocId}");
+
+        if (c.Color != 0 || c.Arguments.Length > 0)
+        {
+            return Concat(
+                head,
+                Invariant($", {Flag(c.Background)}, {Flag(c.Scrollbar)}, {c.Color}, "),
+                Invariant($"\"{Escape(c.Arguments)}\");"));
+        }
+
+        return c.Background || c.Scrollbar
+            ? Concat(head, Invariant($", {Flag(c.Background)}, {Flag(c.Scrollbar)});"))
+            : Concat(head, ");");
+    }
+
+    private static string ButtonType(ButtonCommand c) =>
+        c.Kind == ButtonKind.Page ? "GF_PAGE_BTN" : "GF_CLOSE_BTN";
 
     /// <summary>
     /// Makes text safe inside a double-quoted POL string.

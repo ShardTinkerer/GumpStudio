@@ -38,6 +38,7 @@ public class GoldenTests
         "runuo-numeric",
         "sphere-056",
         "sphere-099",
+        "uox3",
     ];
 
     [Theory]
@@ -80,6 +81,7 @@ public class GoldenTests
             document, new SphereExportOptions { Dialect = SphereDialect.Revision }, Stamp),
         "sphere-099" => SphereScriptBuilder.Build(
             document, new SphereExportOptions { Dialect = SphereDialect.Modern }, Stamp),
+        "uox3" => UoxScriptBuilder.Build(document, new UoxExportOptions(), Stamp),
         _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown format."),
     };
 

@@ -79,7 +79,7 @@ public static class SphereScriptBuilder
     /// kept rather than quietly corrected.
     /// </remarks>
     private static readonly LayoutStringOptions Layout =
-        new() { GroupKeyword = "Group", EmitEndGroup = false };
+        new() { GroupKeyword = "Group", EmitEndGroup = false, HuedGumpPicCommand = false };
 
     /// <summary>Builds the script for a document.</summary>
     /// <param name="document">The gump to export.</param>

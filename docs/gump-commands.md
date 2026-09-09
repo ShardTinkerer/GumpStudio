@@ -65,6 +65,56 @@ replaces only the grayscale ones, leaving art that already has colour alone.
 Dyeable cloth and armour need the partial form; using the full one flattens the
 graphic to a single shade. The same pair exists for `picinpic`.
 
+### A full tint is `gumppichued`, not `gumppic` with a hue
+
+The client's `gumppic` handler reads exactly three positional values and then
+treats every remaining token as `key=value`. Its splitter gives up when it finds
+no `=`, and only a key of `hue` assigns one, so `gumppic 95 70 1417 22` renders
+**untinted** — the hue is skipped without a warning. Both `gumppic … hue=22` and
+`gumppichued 95 70 1417 22` work; the editor writes the second, because it needs
+no keyword syntax and reads like its `gumppicphued` sibling.
+
+The reader still accepts the bare form, since other tools emit it and the intent
+is plain. It just never writes one.
+
+This was found by decompiling `parseGumpDefinition`, after the mapping below had
+claimed for some time that the two forms were equivalent. Every dialect that
+speaks layout strings was dropping the hue on a fully tinted image.
+
+Sphere is the exception that proves this is a dialect matter rather than a
+grammar one. It parses the line and re-emits it, and its `GUMPPIC` handler turns
+a trailing token into the `hue=` form itself — while having no `GUMPPICHUED`
+key at all. So `sphere` / `056` writes the bare form and the other two write the
+explicit command, which is what `LayoutStringOptions.HuedGumpPicCommand`
+selects.
+
+### `picinpic` puts its size last, and three cores get it wrong
+
+The client reads `picinpic x y gumpId sx sy width height` — the source offset
+before the size. Confirmed against a live shard and the current client:
+`picinpic 60 60 2000 20 255 200 60` draws a 200×60 band cropped from (20,255) of
+the paperdoll frame, complete with its yellow parchment edge. Had the size come
+first it would have drawn a 20×255 column of grey stone from (200,60).
+
+ServUO and ModernUO both send `x y gumpId width height sx sy` — from
+`GumpSpriteImage`, and from ModernUO's newer `GumpLayoutBuilder` too — and so
+does Sphere's `CDialogDef.cpp`, even though the comment on its own
+`GUMPCTL_PICINPIC` enum says the opposite and is the one that is right. UOX3's
+`CGump_AddPicInPic` gets it right. A region exported through ServUO's
+`AddSpriteImage` therefore draws from the wrong place until a core fixes it,
+which is what the `runuo` converter notes beside the call.
+
+Worth recording how *not* to settle a question like this. The parameter names in
+a disassembly prove nothing: they are annotations on stack slots the compiler
+shares between commands, so `picinpic`'s 6th and 7th arriving in variables called
+`width`/`height` is an artefact of `resizepic` using the same slots. The static
+argument that did hold up was where the values *go* — `resizepic` and
+`gumppictiled` both carry an unambiguous width and height and pass them as
+arguments 7 and 8 of the shared gump-element constructor, and `picinpic` passes
+its 6th and 7th as those same arguments. Three independent implementations
+agreeing against that was still not enough to overturn it, and not enough to
+trust it either. One screenshot was.
+
 ### `xmfhtmltok` is not `xmfhtmlgumpcolor` plus arguments
 
 Its parameter order is genuinely different: background and scrollbar come
@@ -140,10 +190,11 @@ never in what the editor understood.
 |---|---|
 | `layout` | Everything. It *is* the client's grammar. |
 | `pol` / `layout-strings` | Everything. Raw layout strings. |
-| `sphere` / `056` | Everything. Raw layout strings. |
-| `pol` / `gump-package` | The original element set. The rest is commented out beside the closest call. |
-| `runuo` (either dialect) | Everything except `tilepicasgumppic`, which no core exposes. `AddPicInPic`, `AddMasterGump`, `AddECHandleInput` and `AddLabelCropped` need a ServUO-era core. Radio grouping is not emitted: no core exposes the client's `group`. |
+| `sphere` / `056` | The commands Sphere has a control for. Not a pass-through: Sphere parses these lines and re-emits its own, so eight of them have no key and are dropped — see below. |
+| `pol` / `gump-package` | Everything, through a `GF*` call in every case but one. Needs a current `:gumps:gumps` — see below. |
+| `runuo` (either dialect) | Everything except `tilepicasgumppic` and `mastergump`, which no RunUO or ServUO core exposes at all. Tooltip arguments are dropped — ServUO's two-argument `AddTooltip` is commented out in its own source. `AddSpriteImage`, `AddGroup`, `AddECHandleInput` and `AddLabelCropped` need a ServUO-era core. |
 | `sphere` / `099` | A fixed set of script functions. See below. |
+| `uox3` | Everything except `tilepicasgumppic`, a partial hue, the parser toggles, a hued `picinpic`, and a tooltip's arguments. `mastergump` has a call, but a broken one. No gump position either. |
 
 Where a converter is missing only a *refinement* — a partial hue, a crop
 rectangle, a tile overlay on a button — it emits the nearest thing it does have
@@ -152,22 +203,81 @@ visible element from the gump, which is a far worse answer than drawing it
 slightly wrong. A button whose tile overlay cannot be expressed is still a
 button; commented out, it is a dialog the player cannot dismiss.
 
-Where nothing comes close — `picinpic`, `tilepicasgumppic`, `tooltip` — the
-command is written as a comment rather than as a call that would not run.
+Where nothing comes close, the command is written as a comment rather than as a
+call that would not run. That is now true only of `runuo` and `sphere` / `099`.
 
-## What the POL gump package cannot express
+## How the POL gump package covers the command table
 
-The `:gumps:gumps` distro package has a `GF*` function for the original element
-set only. For everything else the converter emits the layout-string form commented
-out, beside the closest call it does have — which is what the original did for
-`gumppictiled`:
+Every command in the table above has a `GF*` function, so the gump-package
+dialect emits a call for all of them. Exporting the same document both ways and
+comparing the client commands they produce gives 42 identical lines out of 42 —
+the one cosmetic difference being that `GFGumpPic` spells a hue with POL's
+documented `hue=` keyword where the raw form writes it positionally.
+
+That took work on both sides. Some of the functions had been in the package for
+years and the 1.8 exporter simply did not know them: `GFPicTiled`, `GFTextCrop`,
+`GFTooltip`, `GFItemProperty`, `GFAddImageTileButton`, `GFTextEntry`'s trailing
+`lmt`, and `GFAddHTMLLocalized`'s hue and custom string — which between them
+cover all three `xmfhtml` forms, because the package picks the command from the
+arguments it is handed rather than making the caller choose.
+
+The rest did not exist and were added: `GFPicInPic`, `GFTilePicAsGumpPic`,
+`GFMasterGump`, `GFEndRadioGroup`, `GFToggleUpperWordCase`,
+`GFToggleCroppedText`, `GFECHandleInput`, and a trailing `partial` flag on
+`GFGumpPic` for `gumppicphued`.
+
+**This dialect therefore needs a `:gumps:gumps` that has those.** An older
+package will fail to compile the export on the first unknown function. The
+layout-string dialect has no such requirement and is the portable choice.
+
+### The one exception
+
+`GFAddButton`, `GFCheckBox` and `GFRadioButton` all replace a value below one
+with the next free id. A button targeting page 0 exported as a call became a jump
+to an arbitrary page, and the same document exported as layout strings disagreed
+about it. So those three go out through the package's own escape hatch:
 
 ```
-//Gump package does not support picinpic
-//picinpic 20 85 1417 10 20 60 24
+//GFAddButton would assign an id of its own; written out as a layout string.
+XGFAddToLayout(MyGump, "button 20 240 247 248 0 0 0");
 ```
 
-The layout-string dialect has no such gap and emits every command directly.
+`textentry` cannot be rescued the same way — it carries text, and this dialect
+writes its strings inline with no data array for a layout string to index into —
+so a zero entry id is noted in the output instead.
+
+## What the UOX3 gump API can express
+
+UOX3 has the most complete API of the four servers, read off `CGump_Methods` in
+`UOXJSMethods.h`. It is the only one that exposes `endgroup` — without which a
+radio group does not work on pages above the first — and it covers `picinpic`
+with the client's own parameter order, `buttontileart`, `croppedtext`,
+`textentrylimited`, `itemproperty` and all three `xmfhtml` forms.
+
+Two parameter orders differ from the layout command and are easy to get wrong.
+`AddCroppedText` takes its hue **third**, before the width and height, where the
+command puts it last. `AddPicInPic` takes the source offset **before** the size,
+which is what the client reads and what the RunUO-family cores transpose.
+
+What it cannot do, and what the export says instead of dropping:
+
+- **A screen position.** `new Gump()` takes no coordinates and `Send()` takes only
+  a socket, so the editor's position is reported in a comment.
+- **`mastergump`.** `CGump_MasterGump` formats five values from one argument, so
+  the command it appends is garbage. The call is not emitted.
+- **A tooltip's arguments.** `CGump_AddToolTip` starts its argument loop at index
+  two rather than one, so the first argument is skipped and a single-argument
+  call emits an empty `@@`. The cliloc goes out alone.
+- **A partial hue, a hued `picinpic`, `tilepicasgumppic`, and the three toggles.**
+  No call exists.
+
+One quirk shapes the output. UOX3 assigns the text index itself for `AddText`,
+`AddCroppedText` and `AddHTMLGump`, from a counter it advances as it goes — but
+`AddTextEntry` pushes a string onto the same list *without* advancing that
+counter, so an entry shifts every later index by one. The entry's own index is
+passed explicitly and is right; where a later text element would be wrong, the
+export says so on the line above it and suggests moving the entries below the
+labels.
 
 ## Deliberately not modelled
 

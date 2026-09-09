@@ -1,0 +1,128 @@
+// Created 2026-01-02 03:04:05Z, with Gump Studio.
+// Exported with the UOX3 exporter.
+
+// Opens at 50,60 in the editor. UOX3 gumps carry no screen
+// position: new Gump() takes none and Send() takes only a socket.
+
+function DisplayMyGump( pUser )
+{
+	var pSock = pUser.socket;
+	if( pSock == null )
+		return;
+
+	var myGump = new Gump();
+
+	myGump.NoMove();
+	myGump.NoClose();
+	myGump.NoDispose();
+	// No usable call for mastergump 7: UOX3's MasterGump() formats five values from one argument.
+	// No UOX3 call for toggleupperwordcase.
+	// No UOX3 call for togglecroppedtext.
+	// No UOX3 call for echandleinput.
+
+	myGump.AddPage( 0 );
+	// Frame: The window frame
+	myGump.AddBackground( 0, 0, 5054, 300, 200 );
+	// Wash
+	myGump.AddCheckerTrans( 5, 5, 290, 190 );
+	// Tiled
+	myGump.AddTiledGump( 10, 10, 80, 20, 5124 );
+	// Title: Says "hello"
+	myGump.AddText( 20, 20, 88, "He said \"hi\"" );
+	// Cropped
+	myGump.AddCroppedText( 20, 35, 90, 120, 18, "Clipped text" );
+	// Empty
+	myGump.AddText( 20, 55, 0, "" );
+	// Pack
+	myGump.AddPicture( 20, 70, 3821 );
+	// HuedPack
+	myGump.AddPictureColor( 45, 70, 3821, 12 );
+	// Plain
+	myGump.AddGump( 70, 70, 1417 );
+	// Hued
+	myGump.AddGumpColor( 95, 70, 1417, 22 );
+	// PartialHued
+	// No UOX3 call for a partial hue; this tints every pixel.
+	myGump.AddGumpColor( 120, 70, 1417, 22 );
+	// Crop
+	myGump.AddPicInPic( 20, 95, 1417, 10, 20, 60, 24 );
+	// CropHued
+	// AddPicInPic takes no hue; this region is untinted.
+	myGump.AddPicInPic( 85, 95, 1417, 10, 20, 60, 24 );
+	// Icon
+	// No UOX3 call for tilepicasgumppic: item 3823 at 150, 95.
+	// Go to page 1: Switches page
+	myGump.AddButton( 20, 125, 247, 248, 0, 1, 0 );
+	// Tooltip arguments dropped, AddToolTip skips its first: "one	TWO"
+	myGump.AddToolTip( 1011036 );
+	myGump.AddItemProperty( 12345 );
+	// Accept
+	myGump.AddButton( 60, 125, 247, 248, 1, 0, 5 );
+	// Accept again
+	myGump.AddButton( 100, 125, 247, 248, 1, 0, 5 );
+	// Tiled button
+	myGump.AddButtonTileArt( 140, 125, 247, 248, 1, 0, 6, 3823, 8, 4, 2 );
+	// Agree
+	myGump.AddCheckbox( 20, 150, 210, 211, 1, 0 );
+	// First
+	myGump.AddGroup( 3 );
+	myGump.AddRadio( 60, 150, 208, 209, 0, 1 );
+	// Second
+	myGump.AddRadio( 100, 150, 208, 209, 0, 2 );
+	// Name
+	myGump.AddTextEntry( 20, 170, 120, 20, 5, 1, 3, "type here" );
+	// Limited
+	myGump.AddTextEntryLimited( 150, 170, 120, 20, 5, 2, 4, "", 16 );
+	// Deep
+	myGump.AddGump( 165, 75, 1417 );
+	myGump.EndGroup();
+
+	myGump.AddPage( 1 );
+	// Third
+	myGump.AddGroup( 3 );
+	myGump.AddRadio( 20, 20, 208, 209, 0, 3 );
+	// Markup
+	// UOX3 will index this string as 3, but it is at 5: a text entry above did not advance its counter. Move text entries after the labels.
+	myGump.AddHTMLGump( 20, 40, 200, 60, true, true, "<basefont color=#ffffff>literal \"markup\"" );
+	// Localised
+	myGump.AddXMFHTMLGump( 20, 105, 200, 40, 1049004, false, false );
+	// Coloured
+	myGump.AddXMFHTMLGumpColor( 20, 150, 200, 40, 1049005, true, false, 65280 );
+	// Tokenised
+	myGump.AddXMFHTMLTok( 20, 195, 200, 40, false, true, 65280, 1049006, "alpha", "beta", "" );
+	// Back
+	myGump.AddButton( 20, 240, 247, 248, 0, 0, 0 );
+	myGump.EndGroup();
+
+	myGump.Send( pSock );
+	myGump.Free();
+}
+
+function onGumpPress( pSock, pButton, gumpData )
+{
+	var pUser = pSock.currentChar;
+
+	var text1 = "";	// Name
+	var text2 = "";	// Limited
+
+	for( var i = 0; i < gumpData.IDs; i++ )
+	{
+		switch( gumpData.GetId( i ))
+		{
+			case 1: text1 = gumpData.GetEdit( i ); break;
+			case 2: text2 = gumpData.GetEdit( i ); break;
+		}
+	}
+
+	switch( pButton )
+	{
+		case 5: // Accept
+			break;
+
+		case 6: // Tiled button
+			break;
+
+		default:
+			break;
+	}
+}
