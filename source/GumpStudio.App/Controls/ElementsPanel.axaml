@@ -1,6 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="GumpStudio.App.Controls.ElementsPanel">
+             xmlns:vm="clr-namespace:GumpStudio.App.ViewModels"
+             x:Class="GumpStudio.App.Controls.ElementsPanel"
+             x:DataType="vm:MainViewModel">
 
   <DockPanel>
     <!-- Drawing order is the list order, and it is not obvious which end is
@@ -8,7 +10,25 @@
     <TextBlock DockPanel.Dock="Top" Text="back &#8594; front" Foreground="#6A6A70"
                Margin="8,6,8,4" />
 
-    <ListBox Name="_list" Background="#1F1F23" Margin="6,0,6,6" />
+    <!--
+      Each row's own IsSelected is bound rather than the list's SelectedItem, and
+      the list allows several: a marquee on the canvas selects everything it
+      covers, which one SelectedItem could never show. Being selected is a fact
+      about the element, and the element announces it.
+    -->
+    <ListBox Name="_list" Background="#1F1F23" Margin="6,0,6,6"
+             ItemsSource="{Binding Elements}" SelectionMode="Multiple">
+      <ListBox.ItemTemplate>
+        <DataTemplate DataType="vm:ElementRowViewModel">
+          <TextBlock Text="{Binding Label}" />
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+      <ListBox.Styles>
+        <Style Selector="ListBoxItem" x:DataType="vm:ElementRowViewModel">
+          <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}" />
+        </Style>
+      </ListBox.Styles>
+    </ListBox>
   </DockPanel>
 
 </UserControl>

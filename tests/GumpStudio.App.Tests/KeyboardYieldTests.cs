@@ -69,6 +69,35 @@ public class KeyboardYieldTests
         return box;
     }
 
+    /// <summary>
+    /// Arranges for every selection- and history-dependent action to be
+    /// available.
+    /// </summary>
+    /// <remarks>
+    /// The two theories below ask a binding whether it <em>would</em> run, and
+    /// that is now a real question. Every action is defined once and bound to the
+    /// menu bar, the context menu and the keyboard alike, so a shortcut answers
+    /// with the same <c>CanExecute</c> the greyed-out menu item does: Ctrl+C with
+    /// nothing selected declines, and the keystroke goes to whatever should have
+    /// had it.
+    ///
+    /// Before that, a shortcut's only condition was where the keyboard was, so
+    /// these theories could ask an empty document. They set the preconditions up
+    /// instead, which leaves what they are actually testing - that a yielding
+    /// gesture steps aside for a text box, and an ignoring one does not - exactly
+    /// as it was.
+    /// </remarks>
+    private static void MakeEveryActionAvailable(EditorSession session)
+    {
+        // Two commands and one undo, so undo and redo are both possible.
+        session.Apply(new AddElementCommand(session.ActivePage.Root, Label("three")));
+        session.Apply(new AddElementCommand(session.ActivePage.Root, Label("four")));
+        session.History.Undo();
+
+        // More than one element, which grouping and aligning need.
+        session.Canvas.SelectAll();
+    }
+
     private static void Press(MainWindow window, Key key, RawInputModifiers modifiers)
     {
         window.KeyPress(key, modifiers, PhysicalKey.None, string.Empty);
@@ -220,6 +249,8 @@ public class KeyboardYieldTests
             using EditorSession session = SessionIn(directory);
             using MainWindow window = Shown(session);
 
+            MakeEveryActionAvailable(session);
+
             KeyBinding binding = Binding(window, gesture);
 
             Assert.True(binding.Command.CanExecute(null));
@@ -249,6 +280,8 @@ public class KeyboardYieldTests
             using TempDirectory directory = new();
             using EditorSession session = SessionIn(directory);
             using MainWindow window = Shown(session);
+
+            MakeEveryActionAvailable(session);
 
             KeyBinding binding = Binding(window, gesture);
 

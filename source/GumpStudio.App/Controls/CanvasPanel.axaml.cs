@@ -10,13 +10,11 @@ public sealed partial class CanvasPanel : UserControl
     {
         AvaloniaXamlLoader.Load(this);
 
-        PageTabs = this.FindControl<StackPanel>("_pageTabs")!;
         Canvas = this.FindControl<GumpCanvas>("_canvas")!;
         Scroller = this.FindControl<ScrollViewer>("_scroller")!;
+        PageTabs = this.FindControl<ItemsControl>("_pageTabs")!;
     }
 
-    /// <summary>One button per page in the gump.</summary>
-    public StackPanel PageTabs { get; }
 
     /// <summary>The design surface.</summary>
     public GumpCanvas Canvas { get; }
@@ -29,4 +27,7 @@ public sealed partial class CanvasPanel : UserControl
     /// area actually on screen, which only the scroller knows.
     /// </remarks>
     public ScrollViewer Scroller { get; }
+
+    /// <summary>The page strip, which binds one tab per page.</summary>
+    public ItemsControl PageTabs { get; }
 }

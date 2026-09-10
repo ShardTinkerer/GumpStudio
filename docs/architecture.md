@@ -27,9 +27,10 @@ GumpStudio.Rendering     SkiaSharp renderer, art cache, hit-test geometry.
 GumpStudio.Converters    Raw client layout, POL, RunUO and Sphere. Each one
         │                reads the layout IR and knows only its own syntax.
         │
-GumpStudio.App           Avalonia shell. The panels around the canvas are
-                         Dock dockables, so the layout is the user's to
-                         arrange.
+GumpStudio.App           Avalonia shell. View models under ViewModels/, views
+                         and dialogs under Controls/. The panels around the
+                         canvas are Dock dockables, so the layout is the
+                         user's to arrange.
 GumpStudio.Cli           Headless tooling: dump art, convert files, run
                          converters without the UI.
 ```
@@ -83,7 +84,9 @@ legacy `.mul` pair is the fallback, because modern clients ship no
 - `Element.GetAbsolutePosition()` becomes the only way position is read, which
   is what fixes the nested-group export defect.
 - Elements raise change notifications rather than reaching back into a global
-  form; `GlobalObjects` does not survive.
+  form; `GlobalObjects` does not survive. That includes `IsSelected`, which is
+  editor state but not editor-only — the renderer reads it to draw the handles,
+  and the elements list binds to it.
 - **Command-based undo**, replacing whole-document deep-clone snapshots. This
   turns "undo points are created at the wrong time" from a guessing game into an
   ordering question.
@@ -195,6 +198,80 @@ from that list on purpose: the first promotes analysers to errors and can break
 the build by itself, the second is what needs proving when it changes, and the
 third is what CI runs.
 
+## The shell
+
+`MainWindow.axaml.cs` was 2,699 lines — it is now 1,707 — and was simultaneously
+the view, the view model, the controller, the command bus, the dialog coordinator
+and the layout store. Every action existed in three places — a `Click("MenuName", …)` call keyed
+on a control name, a `Bind("Ctrl+X", …)` call, and a hand-built `MenuItem` — and
+the enabled state in two more, `RefreshEditMenu` for the menu bar and the context
+menu's `Opening` handler. Those two drifted, which is the whole argument: for a
+while the bar offered every item whatever was selected, and undo and redo never
+named what they would reverse, while the context menu did both.
+
+```
+EditorSession          the open document, undo history, canvas state, client
+      │                (no UI in it, and never had any)
+MainViewModel          what the shell shows and what it will let you do:
+      │                42 commands, the Can… predicates, title, status
+      │
+      ├── IEditorDialogs    what has to be asked of the user
+      ├── ITextClipboard    the system clipboard
+      └── IShellView        the few things only a window can do
+                            (zoom, Dock panels, closing)
+MainWindow             views, dialogs, and the property grid
+```
+
+Three things follow from it, and each replaces a defect rather than a style:
+
+- **One command surface, three call sites.** The menu bar, the context menu and
+  the keyboard bind the same `IRelayCommand`s and read the same `Can…`
+  properties, so they cannot disagree. `MenuParityTests` asserts they don't.
+- **A misspelled binding is a build error.** `Click`/`ClickAsync` bound silently
+  to nothing on a misspelled control name, so a typo yielded a dead menu item
+  with no error anywhere. `AvaloniaUseCompiledBindingsByDefault` was already
+  set; now that there are bindings to compile, it earns its keep.
+- **A painted gesture cannot lack a binding.** `InputGesture` on a `MenuItem`
+  only *draws* the shortcut — it binds nothing, and every gesture in the menu bar
+  was decorative once. `BindPaintedGestures` walks the menu and binds what it
+  finds painted there, so the label and the binding now come from one place.
+  `AliasGestures` carries the six the menu deliberately does not paint, such as
+  Ctrl and the numeric keypad's `+`.
+
+Two details are load-bearing:
+
+- **`MenuItem.IsEnabled` is bound, not inferred.** A command's `CanExecute`
+  reaches `IsEnabledCore` and leaves the `IsEnabled` styled property `true`, so
+  binding it explicitly from the same `Can…` property is what makes the greyed
+  state observable — to the eye and to `EditMenuStateTests`. `MenuArrange` is a
+  submenu parent with no command of its own and binds only `IsEnabled`, which is
+  also the fix for a disabled item never raising `SubmenuOpened`.
+- **The panels are handed a `DataContext` explicitly.** Dock builds a tool's
+  content through a deferred content control, outside the window's name scope,
+  so nothing inherits one down to a panel. A context menu whose bindings
+  resolved against nothing would leave every item enabled — the exact state
+  being undone — so `MenuParityTests` asserts it resolved.
+
+The page strip and the elements list follow the document rather than being
+rebuilt from it. Both used to be torn down and remade after every edit — the
+strip cleared a panel and made a fresh button per page, the list reassigned its
+item source — and between them they were most of what `RefreshAll` did.
+Synchronising in place is cheaper, but the reason it matters is correctness:
+reassigning the item source made the list reset its own selection each time, and
+the resulting event raced the guard flag that existed to suppress it, so a
+selected element's properties sometimes never appeared. Entries are *moved*
+rather than removed and re-added, because a list rebuilds the container for an
+added item and keeps it for a moved one — which is what stops a z-order change
+flickering. The list now allows a multiple selection too, since a marquee
+selects everything it covers and one `SelectedItem` could never show that.
+
+`CanvasInteractionController.ClearSelection` was silent, which this uncovered.
+Emptying the selection is as much a change as making one, but nothing was told —
+so deleting the selection, switching page and clearing it outright all left a
+listener believing the old selection stood. The window never noticed because it
+rebuilt everything after each edit regardless; a bound menu item noticed at once,
+and went on offering Ungroup for a group that was no longer selected.
+
 ## Known gaps and standing risks
 
 Things a reader should know before changing the relevant code, rather than a
@@ -236,10 +313,14 @@ to-do list.
   layout serialiser was declined for this reason, which is why tearing a panel
   into its own window is not remembered between sessions even though pane sizes
   and hidden panels are.
-- **The shell is imperative.** `MainWindow.axaml.cs` has no view models, and
-  every action is registered three times over — menu, shortcut, context menu.
-  Avalonia's `Click`/`ClickAsync` also bind silently to nothing on a misspelled
-  control name, so a typo yields a dead menu item with no error anywhere.
+- **The property grid is still imperative.** The rest of the shell is not: see
+  [The shell](#the-shell). `MainWindow.axaml.cs` builds every property editor by
+  hand, and keeps a list of closures that push live values into those controls
+  during a drag so the panel is not torn down and rebuilt per mouse-move. It is
+  the largest thing left in that file and the one place where a bound rewrite
+  could regress something a user would feel — the mid-drag path — so it was left
+  alone deliberately rather than by oversight. `RefreshAll` survives for it
+  alone, reached through `IShellView.RefreshDocumentView`.
 - **Smaller known limitations.** Art-gallery rows are built without recycling,
   so roughly forty controls are allocated per row scrolled into view; the canvas
   rasterises its whole surface rather than clipping to the scroll viewport;

@@ -1,11 +1,40 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:controls="clr-namespace:GumpStudio.App.Controls"
-             x:Class="GumpStudio.App.Controls.CanvasPanel">
+             xmlns:vm="clr-namespace:GumpStudio.App.ViewModels"
+             x:Class="GumpStudio.App.Controls.CanvasPanel"
+             x:DataType="vm:MainViewModel">
 
   <DockPanel>
-    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Name="_pageTabs"
-                Background="#26262A" Spacing="2" />
+    <!--
+      One button per page, from the collection rather than cleared and rebuilt.
+      The active tab is a style on the button rather than a brush assigned to it,
+      so nothing outside the view decides what "active" looks like.
+    -->
+    <ItemsControl DockPanel.Dock="Top" Name="_pageTabs" ItemsSource="{Binding Pages}"
+                  Background="#26262A">
+      <ItemsControl.ItemsPanel>
+        <ItemsPanelTemplate>
+          <StackPanel Orientation="Horizontal" Spacing="2" />
+        </ItemsPanelTemplate>
+      </ItemsControl.ItemsPanel>
+      <ItemsControl.ItemTemplate>
+        <DataTemplate DataType="vm:PageTabViewModel">
+          <Button Content="{Binding Label}"
+                  Classes.active="{Binding IsActive}"
+                  Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).ActivatePageCommand}"
+                  CommandParameter="{Binding}" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+      <ItemsControl.Styles>
+        <Style Selector="Button">
+          <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="Button.active">
+          <Setter Property="Background" Value="#3A3A42" />
+        </Style>
+      </ItemsControl.Styles>
+    </ItemsControl>
 
     <!-- The canvas sizes itself from its design area and its zoom. -->
     <ScrollViewer Name="_scroller"

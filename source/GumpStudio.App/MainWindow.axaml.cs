@@ -1,44 +1,41 @@
 using System.Globalization;
+using System.Windows.Input;
 
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Platform;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
-using Avalonia.Interactivity;
+using Avalonia.LogicalTree;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
+using Avalonia.Platform;
 using Avalonia.Threading;
-
-using CommunityToolkit.Mvvm.Input;
 
 using Dock.Avalonia.Controls;
 using Dock.Model.Avalonia.Controls;
 using Dock.Model.Core;
 
 using GumpStudio.App.Controls;
+using GumpStudio.App.ViewModels;
 using GumpStudio.Core.Commands;
 using GumpStudio.Core.Document;
-using GumpStudio.Core.Editing;
 using GumpStudio.Core.Elements;
 using GumpStudio.Core.Export;
-using GumpStudio.Core.Serialization;
 
 namespace GumpStudio.App;
 
-public sealed partial class MainWindow : Window, IDisposable
+public sealed partial class MainWindow : Window, IDisposable, IShellView
 {
     private readonly EditorSession _session;
+    private readonly MainViewModel _viewModel;
 
     private readonly GumpCanvas _canvas = null!;
     private readonly ScrollViewer _scroller = null!;
     private readonly ListBox _elementList = null!;
     private readonly StackPanel _propertyPanel = null!;
-    private readonly StackPanel _pageTabs = null!;
     private readonly ItemsControl _toolbox = null!;
-    private readonly TextBlock _status = null!;
+    private readonly ItemsControl _pageTabs = null!;
     private readonly MenuItem _exportMenu = null!;
     private readonly MenuItem _moveToPageMenu = null!;
     private readonly DockControl _layout = null!;
@@ -71,8 +68,6 @@ public sealed partial class MainWindow : Window, IDisposable
     private IReadOnlyList<PickerEntry>? _hueEntries;
     private IReadOnlyList<PickerEntry>? _fontEntries;
 
-    private bool _suppressSelectionSync;
-    private List<Element>? _listedElements;
     private bool _layoutRestored;
 
     /// <summary>
@@ -104,6 +99,12 @@ public sealed partial class MainWindow : Window, IDisposable
 
         AvaloniaXamlLoader.Load(this);
 
+        // The window owns the dialogs and the clipboard because both need a
+        // window - to be modal against, and to read - and it is the view model's
+        // view for the handful of operations only a window can carry out.
+        _viewModel = new MainViewModel(
+            session, new EditorDialogs(this), new WindowClipboard(this), this);
+
         CanvasPanel canvasPanel = new();
         ToolboxPanel toolboxPanel = new();
         ElementsPanel elementsPanel = new();
@@ -123,15 +124,25 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _canvas = canvasPanel.Canvas;
         _scroller = canvasPanel.Scroller;
-        _pageTabs = canvasPanel.PageTabs;
         _toolbox = toolboxPanel.Items;
+        _pageTabs = canvasPanel.PageTabs;
         _elementList = elementsPanel.List;
         _propertyPanel = propertiesPanel.Rows;
         _clilocPanel = clilocPanel;
         _layout = this.FindControl<DockControl>("Layout")!;
-        _status = this.FindControl<TextBlock>("StatusText")!;
         _exportMenu = this.FindControl<MenuItem>("MenuExport")!;
         _moveToPageMenu = this.FindControl<MenuItem>("MenuMoveToPage")!;
+
+        // After the panels exist, not before: the View menu's checkmarks bind to
+        // toggles that read the canvas, so a binding resolving any earlier would
+        // reach a field still holding null.
+        DataContext = _viewModel;
+
+        // Dock builds a tool's content outside this window's name scope, so
+        // nothing inherits a DataContext down to a panel. Handed over
+        // explicitly rather than relied upon - the context menus need it.
+        canvasPanel.DataContext = _viewModel;
+        elementsPanel.DataContext = _viewModel;
 
         // Filled as the Page menu opens rather than kept in sync: a disabled
         // item never opens its own submenu, so the enabled state has to be
@@ -139,23 +150,16 @@ public sealed partial class MainWindow : Window, IDisposable
         this.FindControl<MenuItem>("MenuPageRoot")!.SubmenuOpened +=
             (_, _) => FillMoveToPageMenu(_moveToPageMenu);
 
-        this.FindControl<MenuItem>("MenuEditRoot")!.SubmenuOpened += (_, _) => RefreshEditMenu();
-
         _canvas.Session = _session;
         _canvas.InteractionChanged += (_, _) => OnInteractionChanged();
 
-        _session.ModifiedChanged += (_, _) => RefreshTitle();
-
-        _elementList.SelectionChanged += OnElementListSelectionChanged;
-
         _session.DocumentChanged += (_, _) =>
         {
-            _listedElements = null;
             _pendingCliloc = null;
 
             RefreshAll();
         };
-        _session.PageChanged += (_, _) => { _listedElements = null; RefreshAll(); };
+        _session.PageChanged += (_, _) => RefreshAll();
 
         // Its own event, not RefreshAll: that runs on every page switch, and
         // re-binding 124,000 rows each time would be felt.
@@ -167,15 +171,20 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _clilocPanel.ShowStatus("No client loaded.");
 
+        _viewModel.ClientOpened += (_, _) => StartClilocWarmup();
+
         BuildToolbox();
-        WireMenus();
-        BindShortcuts();
+
+        // Every gesture the menu paints, bound from the menu itself. After the
+        // DataContext, because it reads each item's Command.
+        BindPaintedGestures();
+        BindAliasGestures();
 
         // One menu instance per host: a ContextMenu belongs to a single control.
-        _canvas.ContextMenu = BuildContextMenu();
-        _elementList.ContextMenu = BuildContextMenu();
+        _canvas.ContextMenu = EditorMenu();
+        _elementList.ContextMenu = EditorMenu();
 
-        LoadGridSettings();
+        _viewModel.LoadGridSettings();
         RestoreWindowBounds();
 
         BuildExportMenu();
@@ -186,129 +195,13 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             RestorePanels();
 
-            await EnsureClientAsync().ConfigureAwait(true);
+            await GuardedAsync(_viewModel.EnsureClientAsync).ConfigureAwait(true);
 
             if (Program.StartupDocument is { } startup)
             {
                 Guarded(() => _session.Open(startup));
             }
         };
-    }
-
-    /// <summary>
-    /// Brings the Edit menu's items in line with the selection and the history.
-    /// </summary>
-    /// <remarks>
-    /// Refreshed as the menu opens rather than on every change, which is both
-    /// cheaper and the only reliable moment: an item is only about to be read
-    /// then. The context menu has always done this; the menu bar did not, so
-    /// every item in it looked available whatever was selected, and undo and
-    /// redo never said what they would undo.
-    /// </remarks>
-    private void RefreshEditMenu()
-    {
-        int selected = _session.Canvas.Selection.Count;
-        bool anyGroup = _session.Canvas.Selection.Any(e => e is GroupElement { IsPageRoot: false });
-
-        Enable("MenuUndo", _session.History.CanUndo);
-        Enable("MenuRedo", _session.History.CanRedo);
-
-        // Naming what will be undone is the difference between a safe click and
-        // a guess.
-        Header(
-            "MenuUndo",
-            _session.History.UndoDescription is { } undoing ? $"_Undo {undoing}" : "_Undo");
-        Header(
-            "MenuRedo",
-            _session.History.RedoDescription is { } redoing ? $"_Redo {redoing}" : "_Redo");
-
-        Enable("MenuCut", selected > 0);
-        Enable("MenuCopy", selected > 0);
-        Enable("MenuDelete", selected > 0);
-        Enable("MenuGroup", selected >= 2);
-        Enable("MenuUngroup", anyGroup);
-        Enable("MenuBringToFront", selected > 0);
-        Enable("MenuBringForward", selected > 0);
-        Enable("MenuSendBackward", selected > 0);
-        Enable("MenuSendToBack", selected > 0);
-        Enable("MenuArrange", selected >= 2);
-
-        void Enable(string name, bool enabled)
-        {
-            if (this.FindControl<MenuItem>(name) is { } item)
-            {
-                item.IsEnabled = enabled;
-            }
-        }
-
-        void Header(string name, string header)
-        {
-            if (this.FindControl<MenuItem>(name) is { } item)
-            {
-                item.Header = header;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Hides or restores one of the side panels.
-    /// </summary>
-    /// <remarks>
-    /// Through <c>HideDockable</c> and <c>RestoreDockable</c>, which move the
-    /// dockable between its owner and the root's hidden list. Dock's
-    /// <c>CloseDockable</c> would remove it from its owner outright and leave
-    /// nothing to restore, which is why the tabs are still not closable.
-    /// </remarks>
-    private void TogglePanel(string dockableId, string menuName)
-    {
-        if (_layout.Factory is not { } factory
-            || this.FindControl<MenuItem>(menuName) is not { } item)
-        {
-            return;
-        }
-
-        bool show = item.IsChecked;
-
-        if (show)
-        {
-            factory.RestoreDockable(dockableId);
-        }
-        else
-        {
-            factory.HideDockable(dockableId);
-        }
-
-        SaveLayout();
-    }
-
-    /// <summary>Brings every hidden panel back and restores the declared sizes.</summary>
-    private void ResetLayout()
-    {
-        if (_layout.Factory is not { } factory)
-        {
-            return;
-        }
-
-        foreach ((string dockableId, string menuName) in Panels)
-        {
-            factory.RestoreDockable(dockableId);
-
-            if (this.FindControl<MenuItem>(menuName) is { } item)
-            {
-                item.IsChecked = true;
-            }
-        }
-
-        foreach ((string paneId, double proportion) in DefaultProportions)
-        {
-            if (this.FindNameScope()?.Find(paneId) is IDock pane)
-            {
-                pane.Proportion = proportion;
-            }
-        }
-
-        SaveLayout();
-        SetStatus("Panel layout reset.");
     }
 
     /// <summary>
@@ -334,13 +227,32 @@ public sealed partial class MainWindow : Window, IDisposable
     /// </remarks>
     internal ItemsControl Toolbox => _toolbox;
 
-    /// <summary>Shows who wrote this and which build it is.</summary>
-    private async Task ShowAboutAsync()
-    {
-        AboutWindow about = new();
+    /// <summary>
+    /// The two context menus, for tests.
+    /// </summary>
+    /// <remarks>
+    /// Exposed for the same reason as the panels above: their hosts are built by
+    /// Dock through a deferred content control, so neither is reliably a logical
+    /// descendant before the window is shown. A test that wants to prove the
+    /// context menu and the menu bar agree cannot go looking for it in the tree.
+    /// </remarks>
+    /// <summary>
+    /// The two bound panels, for tests.
+    /// </summary>
+    /// <remarks>
+    /// Exposed for the same reason as the panels above: Dock builds a tool's
+    /// content through a deferred content control, so neither is reliably a
+    /// logical descendant. The objects here are the ones the application uses,
+    /// and their bindings resolve because the window hands each panel a
+    /// DataContext rather than relying on inheritance.
+    /// </remarks>
+    internal ListBox ElementList => _elementList;
 
-        await about.ShowDialog(this).ConfigureAwait(true);
-    }
+    /// <inheritdoc cref="ElementList"/>
+    internal ItemsControl PageTabs => _pageTabs;
+
+    internal IReadOnlyList<EditorContextMenu> ContextMenus =>
+        [(EditorContextMenu)_canvas.ContextMenu!, (EditorContextMenu)_elementList.ContextMenu!];
 
     /// <summary>
     /// Brings the cliloc browser forward and points it at an id.
@@ -353,14 +265,9 @@ public sealed partial class MainWindow : Window, IDisposable
     /// </remarks>
     private void RevealCliloc(int seedId)
     {
-        if (this.FindControl<MenuItem>("MenuPanelCliloc") is { IsChecked: false } item)
-        {
-            item.IsChecked = true;
-
-            // Through TogglePanel, so restoring and saving the layout stay in
-            // one place. Setting IsChecked raises no Click of its own.
-            TogglePanel("ClilocTool", "MenuPanelCliloc");
-        }
+        // Through the toggle, so restoring and saving the layout stay in one
+        // place. The menu's checkmark follows it rather than driving it.
+        _viewModel.ClilocVisible = true;
 
         // Restoring is not enough when the tool is tabbed behind another one.
         if (_layout.Factory is { } factory
@@ -464,12 +371,20 @@ public sealed partial class MainWindow : Window, IDisposable
     }
 
     /// <summary>The hideable panels, each with the menu item that toggles it.</summary>
-    private static readonly (string DockableId, string MenuName)[] Panels =
+    /// <summary>
+    /// The hideable panels, each with the toggle that reports whether it shows.
+    /// </summary>
+    /// <remarks>
+    /// The visibility used to be read off the menu item's own <c>IsChecked</c>,
+    /// which made the menu the place the state lived. It is the view model's
+    /// now, and the checkmark is a two-way binding to it.
+    /// </remarks>
+    private static readonly (string DockableId, Func<MainViewModel, bool> Shows)[] Panels =
     [
-        ("ToolboxTool", "MenuPanelToolbox"),
-        ("ElementsTool", "MenuPanelElements"),
-        ("PropertiesTool", "MenuPanelProperties"),
-        ("ClilocTool", "MenuPanelCliloc"),
+        ("ToolboxTool", vm => vm.ToolboxVisible),
+        ("ElementsTool", vm => vm.ElementsVisible),
+        ("PropertiesTool", vm => vm.PropertiesVisible),
+        ("ClilocTool", vm => vm.ClilocVisible),
     ];
 
     /// <summary>
@@ -500,10 +415,191 @@ public sealed partial class MainWindow : Window, IDisposable
     /// factor resamples it into a blur, while these land art pixels on whole
     /// screen pixels.
     /// </remarks>
+    /// <summary>
+    /// Tells the panels to re-read the document.
+    /// </summary>
+    /// <remarks>
+    /// The whole-world rebuild, reached through the interface so that a command
+    /// living in the view model can still ask for it. It shrinks as granular
+    /// notification replaces it: the page strip and the element list come off it
+    /// first, leaving the property panel.
+    /// </remarks>
+    public void RefreshDocumentView() => RefreshAll();
+
+    public void InvalidateCanvas() => _canvas.InvalidateVisual();
+
+    /// <inheritdoc />
+    public bool ShowSharedPage
+    {
+        get => _canvas.ShowSharedPage;
+        set => _canvas.ShowSharedPage = value;
+    }
+
+    /// <summary>
+    /// Hides or restores one of the side panels.
+    /// </summary>
+    /// <remarks>
+    /// Through <c>HideDockable</c> and <c>RestoreDockable</c>, which move the
+    /// dockable between its owner and the root's hidden list. Dock's
+    /// <c>CloseDockable</c> would remove it from its owner outright and leave
+    /// nothing to restore, which is why the tabs are still not closable.
+    /// </remarks>
+    public void ShowPanel(string dockableId, bool show)
+    {
+        if (_layout.Factory is not { } factory)
+        {
+            return;
+        }
+
+        if (show)
+        {
+            factory.RestoreDockable(dockableId);
+        }
+        else
+        {
+            factory.HideDockable(dockableId);
+        }
+
+        SaveLayout();
+    }
+
+    /// <summary>Brings every hidden panel back and restores the declared sizes.</summary>
+    public void ResetLayout()
+    {
+        if (_layout.Factory is not { } factory)
+        {
+            return;
+        }
+
+        foreach ((string dockableId, _) in Panels)
+        {
+            factory.RestoreDockable(dockableId);
+        }
+
+        foreach ((string paneId, double proportion) in DefaultProportions)
+        {
+            if (this.FindNameScope()?.Find(paneId) is IDock pane)
+            {
+                pane.Proportion = proportion;
+            }
+        }
+
+        SaveLayout();
+        SetStatus("Panel layout reset.");
+    }
+
+    /// <summary>Closes the window, the question about unsaved work already asked.</summary>
+    public void CloseShell()
+    {
+        _closeConfirmed = true;
+
+        Close();
+    }
+
+    /// <summary>
+    /// Gestures the menu deliberately does not paint.
+    /// </summary>
+    /// <remarks>
+    /// A menu item can show one shortcut, but people reach for more than one:
+    /// zooming in is Ctrl and the '+' key, which is a shifted <c>OemPlus</c>,
+    /// and the numeric keypad has its own key codes entirely. Redo answers to
+    /// both Ctrl+Y and Ctrl+Shift+Z, and Save As has no painted gesture at all.
+    ///
+    /// Disjoint from the painted set on purpose, and a test asserts it: two
+    /// bindings for one gesture both fire, so a duplicate runs its action twice.
+    /// </remarks>
+    private static readonly (string Gesture, Func<MainViewModel, ICommand> Pick)[] AliasGestures =
+    [
+        ("Ctrl+Shift+Z", vm => vm.RedoCommand),
+        ("Ctrl+Shift+S", vm => vm.SaveAsCommand),
+        ("Ctrl+Shift+OemPlus", vm => vm.ZoomInCommand),
+        ("Ctrl+Add", vm => vm.ZoomInCommand),
+        ("Ctrl+Subtract", vm => vm.ZoomOutCommand),
+        ("Ctrl+NumPad0", vm => vm.ZoomResetCommand),
+    ];
+
+    /// <summary>
+    /// Gestures a focused text box owns, which the window steps aside for.
+    /// </summary>
+    /// <remarks>
+    /// A <see cref="TextBox"/> marks these handled itself, and a window
+    /// <c>KeyBinding</c> in Avalonia 12 runs anyway - so the window has to
+    /// decline them rather than rely on the key being consumed.
+    /// </remarks>
+    private static readonly string[] TextEditingGestures =
+        ["Ctrl+Z", "Ctrl+Y", "Ctrl+Shift+Z", "Ctrl+A", "Ctrl+X", "Ctrl+C", "Ctrl+V", "Delete"];
+
+    /// <summary>
+    /// Binds every gesture the menus advertise, from the menus themselves.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>InputGesture</c> on a <see cref="MenuItem"/> only <em>draws</em> the
+    /// shortcut next to the item; it does not make the key do anything. Every
+    /// gesture in the menu bar was decorative once - Ctrl+G, Ctrl+S, Ctrl+Z and
+    /// the rest all did nothing - and the zoom items added later reintroduced
+    /// exactly the same defect, three painted labels with no binding behind them.
+    /// </para>
+    /// <para>
+    /// Walking the menu rather than repeating it by hand is what makes that
+    /// impossible rather than merely tested: a painted gesture and its binding
+    /// now come from the same place, so one cannot exist without the other.
+    /// </para>
+    /// </remarks>
+    private void BindPaintedGestures()
+    {
+        foreach (MenuItem item in this.GetLogicalDescendants().OfType<MenuItem>())
+        {
+            if (item.InputGesture is not { } gesture || item.Command is not { } command)
+            {
+                continue;
+            }
+
+            if (KeyBindings.Any(binding => Equals(binding.Gesture, gesture)))
+            {
+                continue;
+            }
+
+            KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = Wrap(gesture, command) });
+        }
+    }
+
+    /// <summary>Binds the gestures no menu item paints.</summary>
+    private void BindAliasGestures()
+    {
+        foreach ((string gesture, Func<MainViewModel, ICommand> pick) in AliasGestures)
+        {
+            KeyGesture parsed = KeyGesture.Parse(gesture);
+
+            if (KeyBindings.Any(binding => Equals(binding.Gesture, parsed)))
+            {
+                continue;
+            }
+
+            KeyBindings.Add(new KeyBinding
+            {
+                Gesture = parsed,
+                Command = Wrap(parsed, pick(_viewModel)),
+            });
+        }
+    }
+
+    /// <summary>
+    /// Wraps a command so a focused text box keeps the keys that are its own.
+    /// </summary>
+    /// <remarks>
+    /// Only for the gestures in <see cref="TextEditingGestures"/>; everything
+    /// else means the same thing wherever the keyboard happens to be.
+    /// </remarks>
+    private ICommand Wrap(KeyGesture gesture, ICommand command) =>
+        Array.Exists(TextEditingGestures, g => KeyGesture.Parse(g).Equals(gesture))
+            ? new FocusAwareCommand(command, () => FocusManager?.GetFocusedElement() is not TextBox)
+            : command;
+
     private static readonly double[] ZoomLadder =
         [0.25, 1.0 / 3, 0.5, 1.0, 2.0, 3.0, 4.0];
 
-    private void StepZoom(bool up)
+    public void StepZoom(bool up)
     {
         double current = _canvas.Zoom;
 
@@ -521,7 +617,7 @@ public sealed partial class MainWindow : Window, IDisposable
         SetZoom(next.Value);
     }
 
-    private void SetZoom(double zoom)
+    public void SetZoom(double zoom)
     {
         _canvas.Zoom = zoom;
 
@@ -529,7 +625,7 @@ public sealed partial class MainWindow : Window, IDisposable
     }
 
     /// <summary>Scales the gump so all of it fits the visible area.</summary>
-    private void ZoomToFit()
+    public void ZoomToFit()
     {
         _canvas.ZoomToFit(_scroller.Viewport);
 
@@ -582,9 +678,9 @@ public sealed partial class MainWindow : Window, IDisposable
 
         layout.HiddenPanels.Clear();
 
-        foreach ((string dockableId, string menuName) in Panels)
+        foreach ((string dockableId, Func<MainViewModel, bool> shows) in Panels)
         {
-            if (this.FindControl<MenuItem>(menuName) is { IsChecked: false })
+            if (!shows(_viewModel))
             {
                 layout.HiddenPanels.Add(dockableId);
             }
@@ -658,13 +754,13 @@ public sealed partial class MainWindow : Window, IDisposable
             }
         }
 
-        foreach ((string dockableId, string menuName) in Panels)
-        {
-            if (this.FindControl<MenuItem>(menuName) is { } item)
-            {
-                item.IsChecked = !layout.HiddenPanels.Contains(dockableId);
-            }
-        }
+        // Seeded rather than assigned one by one: a toggle that acted on its own
+        // change would undo the restore in progress and then save over it.
+        _viewModel.AdoptPanelVisibility(
+            toolbox: !layout.HiddenPanels.Contains("ToolboxTool"),
+            elements: !layout.HiddenPanels.Contains("ElementsTool"),
+            properties: !layout.HiddenPanels.Contains("PropertiesTool"),
+            cliloc: !layout.HiddenPanels.Contains("ClilocTool"));
 
         _layoutRestored = true;
     }
@@ -686,6 +782,23 @@ public sealed partial class MainWindow : Window, IDisposable
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// One context menu, ready for a host.
+    /// </summary>
+    /// <remarks>
+    /// Only the page submenu is filled here; everything else is bound. Pages are
+    /// added and removed while the editor is open, so a stale entry would point
+    /// at a page that no longer exists.
+    /// </remarks>
+    private EditorContextMenu EditorMenu()
+    {
+        EditorContextMenu menu = new() { DataContext = _viewModel };
+
+        menu.Opening += (_, _) => FillMoveToPageMenu(menu.MoveToPageItem);
+
+        return menu;
     }
 
     /// <summary>Gives a dockable declared in the layout the view it shows.</summary>
@@ -711,338 +824,19 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    private void WireMenus()
-    {
-        ClickAsync("MenuNew", NewAsync);
-        ClickAsync("MenuExit", CloseAsync);
-        Click("MenuUndo", () => { _session.History.Undo(); RefreshAll(); });
-        Click("MenuRedo", () => { _session.History.Redo(); RefreshAll(); });
-        Click("MenuSelectAll", () => { _session.Canvas.SelectAll(); RefreshAll(); });
-        Click("MenuDelete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
-        Click("MenuGroup", GroupSelection);
-        Click("MenuUngroup", UngroupSelection);
-        Click("MenuAlignLeft", () => Arrange(() => _session.Canvas.Align(AlignMode.Left), "Aligned lefts."));
-        Click("MenuAlignRight", () => Arrange(() => _session.Canvas.Align(AlignMode.Right), "Aligned rights."));
-        Click("MenuAlignTop", () => Arrange(() => _session.Canvas.Align(AlignMode.Top), "Aligned tops."));
-        Click("MenuAlignBottom", () => Arrange(() => _session.Canvas.Align(AlignMode.Bottom), "Aligned bottoms."));
-        Click("MenuCentreH", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterHorizontally), "Centred horizontally."));
-        Click("MenuCentreV", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterVertically), "Centred vertically."));
-        Click("MenuSpaceH", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Horizontally), "Spaced horizontally.", 3));
-        Click("MenuSpaceV", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Vertically), "Spaced vertically.", 3));
-        Click("MenuBringToFront", () => Reorder(_session.Canvas.BringToFront, "front"));
-        Click("MenuBringForward", () => Reorder(_session.Canvas.BringForward, "forward"));
-        Click("MenuSendBackward", () => Reorder(_session.Canvas.SendBackward, "backward"));
-        Click("MenuSendToBack", () => Reorder(_session.Canvas.SendToBack, "back"));
-        Click("MenuAddPage", AddPage);
-        Click("MenuShowPage0", ToggleSharedPage);
-        Click("MenuPanelToolbox", () => TogglePanel("ToolboxTool", "MenuPanelToolbox"));
-        Click("MenuPanelElements", () => TogglePanel("ElementsTool", "MenuPanelElements"));
-        Click("MenuPanelProperties", () => TogglePanel("PropertiesTool", "MenuPanelProperties"));
-        Click("MenuPanelCliloc", () => TogglePanel("ClilocTool", "MenuPanelCliloc"));
-        Click("MenuResetLayout", ResetLayout);
-        ClickAsync("MenuAbout", ShowAboutAsync);
-        Click("MenuZoomIn", () => StepZoom(up: true));
-        Click("MenuZoomOut", () => StepZoom(up: false));
-        Click("MenuZoomReset", () => SetZoom(1.0));
-        Click("MenuZoomFit", ZoomToFit);
-        Click("MenuShowGrid", ApplyGridSettings);
-        Click("MenuSnapToGrid", ApplyGridSettings);
-        ClickAsync("MenuGridSize", ChooseGridSizeAsync);
-        ClickAsync("MenuGumpProperties", EditGumpPropertiesAsync);
-        Click("MenuRemovePage", RemovePage);
-        Click("MenuInsertPage", InsertPage);
-        Click("MenuClearPage", ClearPage);
-
-        ClickAsync("MenuCut", () => CopyAsync(cut: true));
-        ClickAsync("MenuCopy", () => CopyAsync(cut: false));
-        ClickAsync("MenuPaste", PasteAsync);
-
-        ClickAsync("MenuOpen", OpenAsync);
-        ClickAsync("MenuSave", () => SaveAsync(_session.DocumentPath));
-        ClickAsync("MenuSaveAs", () => SaveAsync(null));
-        ClickAsync("MenuImportLegacy", ImportLegacyAsync);
-        ClickAsync("MenuImportLayout", ImportLayoutAsync);
-        ClickAsync("MenuSetClient", () => ChooseClientAsync(force: true));
-    }
-
     /// <summary>
-    /// Registers the keyboard shortcuts the menu advertises.
+    /// Forwards to the view model, which owns the policy.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <c>InputGesture</c> on a <see cref="MenuItem"/> only <em>draws</em> the
-    /// shortcut next to the item; it does not make the key do anything. Every
-    /// gesture in the menu bar was therefore decorative — Ctrl+G, Ctrl+S, Ctrl+Z
-    /// and the rest all did nothing. These bindings are what actually run them.
-    /// </para>
-    /// <para>
-    /// They live on the window, and a window <c>KeyBinding</c> in Avalonia 12
-    /// runs <em>even when the focused control has already marked the key
-    /// handled</em> — a <see cref="TextBox"/> sets <c>Handled</c> for Ctrl+C,
-    /// Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z and Delete and is overridden anyway. So the
-    /// ones a text box owns check focus themselves; see <see cref="IsEditingText"/>.
-    /// </para>
+    /// Kept as private helpers rather than replaced at each call site: the parts
+    /// of the shell still driving the session directly - the cliloc hand-off, the
+    /// toolbox, the two runtime-built menus and the property grid - all report a
+    /// failure the same way, and there is no reason for them to say so twice.
     /// </remarks>
-    private void BindShortcuts()
-    {
-        // These belong to whatever text box has the caret when one does.
-        Bind("Ctrl+Z", () => { _session.History.Undo(); RefreshAll(); }, TextEditing.Yields);
-        Bind("Ctrl+Y", () => { _session.History.Redo(); RefreshAll(); }, TextEditing.Yields);
-        Bind("Ctrl+Shift+Z", () => { _session.History.Redo(); RefreshAll(); }, TextEditing.Yields);
-        Bind("Ctrl+A", () => { _session.Canvas.SelectAll(); RefreshAll(); }, TextEditing.Yields);
-        Bind("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); }, TextEditing.Yields);
+    private void Guarded(Action action) => _viewModel.RunGuarded(action);
 
-        BindAsync("Ctrl+X", () => CopyAsync(cut: true), TextEditing.Yields);
-        BindAsync("Ctrl+C", () => CopyAsync(cut: false), TextEditing.Yields);
-        BindAsync("Ctrl+V", PasteAsync, TextEditing.Yields);
-
-        // These mean the same thing wherever the keyboard happens to be.
-        //
-        // Through the same NewAsync the File menu uses, not straight to
-        // NewDocument: the menu item asked before discarding unsaved work and
-        // the shortcut did not, so the two paths for one action disagreed about
-        // whether the document was safe.
-        BindAsync("Ctrl+N", NewAsync);
-        Bind("Ctrl+G", GroupSelection);
-        Bind("Ctrl+Shift+G", UngroupSelection);
-        Bind("Ctrl+Shift+Up", () => Reorder(_session.Canvas.BringToFront, "front"));
-        Bind("Ctrl+Up", () => Reorder(_session.Canvas.BringForward, "forward"));
-        Bind("Ctrl+Down", () => Reorder(_session.Canvas.SendBackward, "backward"));
-        Bind("Ctrl+Shift+Down", () => Reorder(_session.Canvas.SendToBack, "back"));
-
-        BindAsync("Ctrl+O", OpenAsync);
-        BindAsync("Ctrl+S", () => SaveAsync(_session.DocumentPath));
-        BindAsync("Ctrl+Shift+S", () => SaveAsync(null));
-
-        // Zoom, bound to more gestures than the menu paints. The label has to
-        // name one, but the key people press for "zoom in" is Ctrl and the '+'
-        // key — a shifted OemPlus — and the numeric keypad has its own codes
-        // entirely, so binding only the printed gesture leaves the shortcut
-        // working for nobody who reaches for the obvious key.
-        //
-        // These are ordinary window bindings because InputGesture on a MenuItem
-        // only draws the shortcut; it binds nothing. Every gesture in this menu
-        // bar was decorative once, and these three were decorative again from
-        // the day they were added until someone tried them.
-        Bind("Ctrl+OemPlus", () => StepZoom(up: true));
-        Bind("Ctrl+Shift+OemPlus", () => StepZoom(up: true));
-        Bind("Ctrl+Add", () => StepZoom(up: true));
-
-        Bind("Ctrl+OemMinus", () => StepZoom(up: false));
-        Bind("Ctrl+Subtract", () => StepZoom(up: false));
-
-        Bind("Ctrl+D0", () => SetZoom(1.0));
-        Bind("Ctrl+NumPad0", () => SetZoom(1.0));
-    }
-
-    /// <summary>Whether a shortcut steps aside while text is being edited.</summary>
-    private enum TextEditing
-    {
-        /// <summary>The shortcut means the same thing wherever focus is.</summary>
-        Ignores,
-
-        /// <summary>A focused text box owns this key, so the window does nothing.</summary>
-        Yields,
-    }
-
-    /// <summary>
-    /// Whether a text box currently has the keyboard.
-    /// </summary>
-    /// <remarks>
-    /// A window <c>KeyBinding</c> in Avalonia 12 runs <em>even when the focused
-    /// control has already marked the key handled</em> — verified against a
-    /// headless <see cref="TextBox"/>, which sets <c>Handled</c> for Ctrl+C,
-    /// Ctrl+X, Ctrl+V, Ctrl+A, Ctrl+Z and Delete and is overridden anyway. So the
-    /// shortcuts have to check focus themselves; there is nothing to opt into
-    /// that makes bubbling stop.
-    /// </remarks>
-    private bool IsEditingText() =>
-        FocusManager?.GetFocusedElement() is TextBox;
-
-    /// <summary>
-    /// Registers one shortcut.
-    /// </summary>
-    /// <remarks>
-    /// Yielding is expressed as <c>CanExecute</c>, not as an early return from the
-    /// command. A <see cref="KeyBinding"/> marks the key handled whenever it
-    /// executes, so a command that runs and does nothing still swallows the
-    /// keystroke — which left Ctrl+C in a property field copying nothing at all
-    /// instead of copying the element. Refusing to execute lets the key reach the
-    /// text box that should have had it.
-    /// </remarks>
-    private void Bind(string gesture, Action action, TextEditing editing = TextEditing.Ignores) =>
-        KeyBindings.Add(new KeyBinding
-        {
-            Gesture = KeyGesture.Parse(gesture),
-            Command = new RelayCommand(() => Guarded(action), () => Allows(editing)),
-        });
-
-    private void BindAsync(
-        string gesture, Func<Task> action, TextEditing editing = TextEditing.Ignores) =>
-        KeyBindings.Add(new KeyBinding
-        {
-            Gesture = KeyGesture.Parse(gesture),
-            Command = new AsyncRelayCommand(() => GuardedAsync(action), () => Allows(editing)),
-        });
-
-    /// <summary>Whether a shortcut may run, given where the keyboard is.</summary>
-    private bool Allows(TextEditing editing) =>
-        editing == TextEditing.Ignores || !IsEditingText();
-
-    /// <summary>
-    /// Builds the canvas context menu.
-    /// </summary>
-    /// <remarks>
-    /// The original had no context menu on the design surface at all: every
-    /// action meant a trip to the menu bar. Items are never rebuilt — only their
-    /// enabled state is refreshed as the menu opens, so a disabled entry still
-    /// shows what is possible and where to find it.
-    /// </remarks>
-    private ContextMenu BuildContextMenu()
-    {
-        MenuItem undo = Item("Undo", () => { _session.History.Undo(); RefreshAll(); });
-        MenuItem redo = Item("Redo", () => { _session.History.Redo(); RefreshAll(); });
-        MenuItem group = Item("Group selection", GroupSelection);
-        MenuItem ungroup = Item("Ungroup", UngroupSelection);
-        MenuItem front = Item("Bring to front", () => Reorder(_session.Canvas.BringToFront, "front"));
-        MenuItem forward = Item("Bring forward", () => Reorder(_session.Canvas.BringForward, "forward"));
-        MenuItem backward = Item("Send backward", () => Reorder(_session.Canvas.SendBackward, "backward"));
-        MenuItem back = Item("Send to back", () => Reorder(_session.Canvas.SendToBack, "back"));
-        MenuItem cut = Item("Cut", () => _ = GuardedAsync(() => CopyAsync(cut: true)));
-        MenuItem copy = Item("Copy", () => _ = GuardedAsync(() => CopyAsync(cut: false)));
-        MenuItem paste = Item("Paste", () => _ = GuardedAsync(PasteAsync));
-        MenuItem delete = Item("Delete", () => { _session.Canvas.DeleteSelection(); RefreshAll(); });
-        MenuItem moveToPage = new() { Header = "Move to page" };
-
-        MenuItem arrange = new()
-        {
-            Header = "Arrange",
-            ItemsSource = new List<object>
-            {
-                Item("Align lefts", () => Arrange(() => _session.Canvas.Align(AlignMode.Left), "Aligned lefts.")),
-                Item("Align rights", () => Arrange(() => _session.Canvas.Align(AlignMode.Right), "Aligned rights.")),
-                Item("Align tops", () => Arrange(() => _session.Canvas.Align(AlignMode.Top), "Aligned tops.")),
-                Item("Align bottoms", () => Arrange(() => _session.Canvas.Align(AlignMode.Bottom), "Aligned bottoms.")),
-                new Separator(),
-                Item("Centre horizontally", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterHorizontally), "Centred horizontally.")),
-                Item("Centre vertically", () => Arrange(() => _session.Canvas.Align(AlignMode.CenterVertically), "Centred vertically.")),
-                new Separator(),
-                Item("Equalise horizontal spacing", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Horizontally), "Spaced horizontally.", 3)),
-                Item("Equalise vertical spacing", () => Arrange(() => _session.Canvas.Distribute(DistributeMode.Vertically), "Spaced vertically.", 3)),
-            },
-        };
-
-        ContextMenu menu = new()
-        {
-            ItemsSource = new List<object>
-            {
-                undo,
-                redo,
-                new Separator(),
-                group,
-                ungroup,
-                new Separator(),
-                front,
-                forward,
-                backward,
-                back,
-                new Separator(),
-                cut,
-                copy,
-                paste,
-                new Separator(),
-                arrange,
-                moveToPage,
-                new Separator(),
-                delete,
-                new Separator(),
-                Item("Select all", () => { _session.Canvas.SelectAll(); RefreshAll(); }),
-                Item("Gump properties…", () => _ = GuardedAsync(EditGumpPropertiesAsync)),
-            },
-        };
-
-        menu.Opening += (_, _) =>
-        {
-            int selected = _session.Canvas.Selection.Count;
-            bool anyGroup = _session.Canvas.Selection.Any(e => e is GroupElement { IsPageRoot: false });
-
-            undo.IsEnabled = _session.History.CanUndo;
-            redo.IsEnabled = _session.History.CanRedo;
-
-            // Naming what will be undone is the difference between a safe click
-            // and a guess.
-            undo.Header = _session.History.UndoDescription is { } undoing ? $"Undo {undoing}" : "Undo";
-            redo.Header = _session.History.RedoDescription is { } redoing ? $"Redo {redoing}" : "Redo";
-
-            group.IsEnabled = selected >= 2;
-            ungroup.IsEnabled = anyGroup;
-            front.IsEnabled = forward.IsEnabled = backward.IsEnabled = back.IsEnabled = selected > 0;
-            delete.IsEnabled = selected > 0;
-            cut.IsEnabled = copy.IsEnabled = selected > 0;
-            arrange.IsEnabled = selected >= 2;
-
-            FillMoveToPageMenu(moveToPage);
-        };
-
-        return menu;
-
-        MenuItem Item(string header, Action action)
-        {
-            MenuItem item = new() { Header = header };
-
-            item.Click += (_, _) => Guarded(action);
-
-            return item;
-        }
-    }
-
-    private void Click(string name, Action action)
-    {
-        if (this.FindControl<MenuItem>(name) is { } item)
-        {
-            item.Click += (_, _) => Guarded(action);
-        }
-    }
-
-    private void ClickAsync(string name, Func<Task> action)
-    {
-        if (this.FindControl<MenuItem>(name) is { } item)
-        {
-            item.Click += async (_, _) => await GuardedAsync(action).ConfigureAwait(true);
-        }
-    }
-
-    /// <summary>
-    /// Runs an action, reporting failures in the status bar.
-    /// </summary>
-    /// <remarks>
-    /// The original showed a modal message box from twenty-odd catch blocks and
-    /// carried on regardless. A status line is less intrusive and does not
-    /// interrupt what the user was doing.
-    /// </remarks>
-    private void Guarded(Action action)
-    {
-        try
-        {
-            action();
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException)
-        {
-            SetStatus(ex.Message, isError: true);
-        }
-    }
-
-    private async Task GuardedAsync(Func<Task> action)
-    {
-        try
-        {
-            await action().ConfigureAwait(true);
-        }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException)
-        {
-            SetStatus(ex.Message, isError: true);
-        }
-    }
+    /// <inheritdoc cref="Guarded"/>
+    private Task GuardedAsync(Func<Task> action) => _viewModel.RunGuardedAsync(action);
 
     private void BuildToolbox()
     {
@@ -1069,433 +863,23 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             Button button = new() { Content = label, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch };
 
-            button.Click += (_, _) => AddElement(create());
+            button.Click += (_, _) => Guarded(() => _viewModel.AddElement(create()));
             buttons.Add(button);
         }
 
         _toolbox.ItemsSource = buttons;
     }
 
-    private void AddElement(Element element)
-    {
-        _session.History.Push(new AddElementCommand(_session.ActivePage.Root, element));
-        _session.MeasureActivePage();
-        _session.Canvas.Select(element);
-
-        RefreshAll();
-    }
-
-    private void GroupSelection()
-    {
-        if (_session.Canvas.Group() is null)
-        {
-            SetStatus("Select at least two elements to group.");
-
-            return;
-        }
-
-        RefreshAll();
-    }
-
-    private void UngroupSelection()
-    {
-        int dissolved = _session.Canvas.Ungroup();
-
-        if (dissolved == 0)
-        {
-            SetStatus("Select a group to ungroup.");
-
-            return;
-        }
-
-        RefreshAll();
-        SetStatus(dissolved == 1 ? "Ungrouped." : $"Ungrouped {dissolved} groups.");
-    }
-
-    /// <summary>
-    /// Puts the selection on the clipboard, optionally removing it.
-    /// </summary>
-    /// <remarks>
-    /// As XML text rather than a serialised object graph. It survives between
-    /// instances, can be inspected by pasting it anywhere, and cannot carry
-    /// anything executable — which the original's <c>BinaryFormatter</c> payload
-    /// could, and which is a large part of why that format had to go.
-    /// </remarks>
-    private async Task CopyAsync(bool cut)
-    {
-        if (_session.Canvas.Selection.Count == 0)
-        {
-            SetStatus("Select something to copy.");
-
-            return;
-        }
-
-        if (Clipboard is not { } clipboard)
-        {
-            SetStatus("No clipboard is available.");
-
-            return;
-        }
-
-        int count = _session.Canvas.Selection.Count;
-
-        // Avalonia 12 replaced SetTextAsync with a data-transfer object that can
-        // carry several representations; text is the only one we offer.
-        //
-        // Deliberately not disposed: the clipboard takes ownership and may call
-        // back into it to serve the data, so releasing it here would be handing
-        // the system a payload we had already torn down.
-#pragma warning disable CA2000
-        DataTransfer payload = new();
-#pragma warning restore CA2000
-
-        payload.Add(DataTransferItem.CreateText(GumpXmlSerializer.ToFragment(_session.Canvas.Selection)));
-
-        await clipboard.SetDataAsync(payload).ConfigureAwait(true);
-
-        // Hands the data to the OS so it outlives this process. Windows only;
-        // elsewhere the clipboard is served by the owning application anyway and
-        // the call does nothing.
-        await clipboard.FlushAsync().ConfigureAwait(true);
-
-        if (cut)
-        {
-            _session.Canvas.DeleteSelection();
-        }
-
-        RefreshAll();
-        SetStatus(string.Create(
-            CultureInfo.InvariantCulture,
-            $"{(cut ? "Cut" : "Copied")} {count} element(s)."));
-    }
-
-    private async Task PasteAsync()
-    {
-        if (Clipboard is not { } clipboard)
-        {
-            SetStatus("No clipboard is available.");
-
-            return;
-        }
-
-        // The transfer object owns platform resources and must be disposed.
-        using IAsyncDataTransfer? transfer = await clipboard.TryGetDataAsync().ConfigureAwait(true);
-
-        string? text = transfer is null
-            ? null
-            : await transfer.TryGetTextAsync().ConfigureAwait(true);
-
-        IReadOnlyList<Element> elements = GumpXmlSerializer.FromFragment(text);
-
-        if (elements.Count == 0)
-        {
-            // The clipboard holds whatever the user last copied anywhere, so text
-            // that is not ours is an ordinary outcome, not a failure.
-            SetStatus("Nothing on the clipboard to paste.");
-
-            return;
-        }
-
-        int pasted = _session.Canvas.Paste(elements);
-
-        _session.MeasureActivePage();
-
-        RefreshAll();
-        SetStatus(string.Create(CultureInfo.InvariantCulture, $"Pasted {pasted} element(s)."));
-    }
-
-    /// <summary>
-    /// Applies an alignment or spacing pass and says what happened.
-    /// </summary>
-    /// <remarks>
-    /// Spacing needs three elements, not two: with two there is nothing between
-    /// them to even out. Saying so beats a command that looks broken.
-    /// </remarks>
-    private void Arrange(Func<bool> operation, string done, int required = 2)
-    {
-        if (_session.Canvas.Selection.Count < required)
-        {
-            SetStatus(required > 2
-                ? "Select at least three elements to space them evenly."
-                : "Select at least two elements to align them.");
-
-            return;
-        }
-
-        if (!operation())
-        {
-            SetStatus("Already arranged.");
-
-            return;
-        }
-
-        RefreshAll();
-        SetStatus(done);
-    }
-
-    /// <summary>Applies a drawing-order change and says what happened.</summary>
-    /// <remarks>
-    /// Silence when nothing moves is ambiguous — an element already at the front
-    /// looks the same as a shortcut that is not wired up. Saying so distinguishes
-    /// them.
-    /// </remarks>
-    private void Reorder(Func<bool> operation, string where)
-    {
-        if (_session.Canvas.Selection.Count == 0)
-        {
-            SetStatus("Select something to reorder.");
-
-            return;
-        }
-
-        if (!operation())
-        {
-            SetStatus($"Already at the {where}.");
-
-            return;
-        }
-
-        RefreshAll();
-        SetStatus($"Moved {where}.");
-    }
-
-    /// <summary>
-    /// Turns the always-visible page 0 backdrop on and off.
-    /// </summary>
-    /// <remarks>
-    /// It is on by default because that is what the player sees; hiding it helps
-    /// when a full-page background on page 0 obscures the page being edited.
-    /// </remarks>
-    private void ToggleSharedPage()
-    {
-        _canvas.ShowSharedPage = this.FindControl<MenuItem>("MenuShowPage0")?.IsChecked ?? true;
-
-        _canvas.InvalidateVisual();
-    }
-
-    /// <summary>Reads the grid toggles back into the editing session.</summary>
-    private void ApplyGridSettings()
-    {
-        _session.Canvas.Grid.Visible = this.FindControl<MenuItem>("MenuShowGrid")?.IsChecked ?? false;
-        _session.Canvas.Grid.SnapEnabled = this.FindControl<MenuItem>("MenuSnapToGrid")?.IsChecked ?? false;
-
-        SaveSettings();
-
-        _canvas.InvalidateVisual();
-    }
-
-    private async Task ChooseGridSizeAsync()
-    {
-        GridSizeWindow dialog = new(_session.Canvas.Grid.Width, _session.Canvas.Grid.Height);
-
-        await dialog.ShowDialog(this).ConfigureAwait(true);
-
-        if (dialog.Result is not { } size)
-        {
-            return;
-        }
-
-        _session.Canvas.Grid.Width = size.Width;
-        _session.Canvas.Grid.Height = size.Height;
-
-        SaveSettings();
-
-        _canvas.InvalidateVisual();
-        SetStatus($"Grid set to {size.Width} x {size.Height}.");
-    }
-
-    private async Task EditGumpPropertiesAsync()
-    {
-        GumpPropertiesWindow dialog = new(_session.Document.Properties);
-
-        await dialog.ShowDialog(this).ConfigureAwait(true);
-
-        if (dialog.Result is not { } properties)
-        {
-            return;
-        }
-
-        _session.History.Push(new SetGumpPropertiesCommand(_session.Document, properties));
-
-        RefreshAll();
-        SetStatus("Gump properties updated.");
-    }
-
-    private void SaveSettings()
-    {
-        AppSettings settings = _session.Settings;
-
-        settings.GridWidth = _session.Canvas.Grid.Width;
-        settings.GridHeight = _session.Canvas.Grid.Height;
-        settings.GridVisible = _session.Canvas.Grid.Visible;
-        settings.GridSnap = _session.Canvas.Grid.SnapEnabled;
-
-        settings.Save();
-    }
-
-    private void LoadGridSettings()
-    {
-        AppSettings settings = _session.Settings;
-
-        _session.Canvas.Grid.Width = settings.GridWidth;
-        _session.Canvas.Grid.Height = settings.GridHeight;
-        _session.Canvas.Grid.Visible = settings.GridVisible;
-        _session.Canvas.Grid.SnapEnabled = settings.GridSnap;
-
-        if (this.FindControl<MenuItem>("MenuShowGrid") is { } show)
-        {
-            show.IsChecked = settings.GridVisible;
-        }
-
-        if (this.FindControl<MenuItem>("MenuSnapToGrid") is { } snap)
-        {
-            snap.IsChecked = settings.GridSnap;
-        }
-    }
-
-    private void AddPage()
-    {
-        AddPageCommand command = new(_session.Document);
-
-        _session.Apply(command);
-
-        _session.ActivePageIndex = _session.Document.PageCount - 1;
-
-        RefreshAll();
-        SetStatus($"Added {command.Page.Name}.");
-    }
-
-    private void InsertPage()
-    {
-        int index = _session.ActivePageIndex;
-        InsertPageCommand command = new(_session.Document, index);
-
-        _session.Apply(command);
-
-        _session.ActivePageIndex = index;
-
-        RefreshAll();
-        SetStatus($"Inserted a page at {index}.");
-    }
-
-    /// <summary>
-    /// Removes the active page.
-    /// </summary>
-    /// <remarks>
-    /// Through the undo history, unlike the original and unlike this editor's
-    /// first version: removing a page takes every element on it, and that was
-    /// the one action here with no way back.
-    /// </remarks>
-    private void RemovePage()
-    {
-        if (_session.Document.PageCount == 1)
-        {
-            SetStatus("A gump must keep at least one page.");
-
-            return;
-        }
-
-        RemovePageCommand command = new(_session.Document, _session.ActivePageIndex);
-        int active = command.ActiveIndexAfterRemoval;
-
-        _session.Apply(command);
-
-        _session.ActivePageIndex = active;
-
-        RefreshAll();
-        SetStatus($"{command.Description}. Undo brings it back with its elements.");
-    }
-
-    private void ClearPage()
-    {
-        ClearPageCommand command = new(_session.ActivePage);
-
-        if (!command.HasContent)
-        {
-            SetStatus("That page is already empty.");
-
-            return;
-        }
-
-        _session.Canvas.ClearSelection();
-        _session.Apply(command);
-
-        RefreshAll();
-        SetStatus(command.Description + ".");
-    }
-
     private void RefreshAll()
     {
-        RefreshPages();
-        RefreshElementList();
         RefreshProperties();
 
         _canvas.InvalidateVisual();
-
-        RefreshTitle();
 
         SetStatus(
             $"{_session.Document.PageCount} page(s), "
             + $"{_session.ActivePage.Root.Children.Count} element(s) on page {_session.ActivePageIndex}"
             + (_session.DocumentPath is { } path ? $" — {Path.GetFileName(path)}" : string.Empty));
-    }
-
-    private void RefreshPages()
-    {
-        _pageTabs.Children.Clear();
-
-        for (int i = 0; i < _session.Document.PageCount; i++)
-        {
-            int index = i;
-
-            Button tab = new()
-            {
-                Content = $"Page {i}",
-                Background = i == _session.ActivePageIndex
-                    ? new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x42))
-                    : Brushes.Transparent,
-            };
-
-            tab.Click += (_, _) =>
-            {
-                _session.ActivePageIndex = index;
-                RefreshAll();
-            };
-
-            _pageTabs.Children.Add(tab);
-        }
-    }
-
-    /// <summary>
-    /// Syncs the element list with the page and the current selection.
-    /// </summary>
-    /// <remarks>
-    /// The item source is rebuilt only when the page's contents actually change.
-    /// Reassigning it unconditionally made the list reset its own selection on
-    /// every refresh, and the resulting event raced the suppression flag — the
-    /// visible symptom was a selected element whose properties never appeared.
-    /// </remarks>
-    private void RefreshElementList()
-    {
-        _suppressSelectionSync = true;
-
-        try
-        {
-            IReadOnlyList<Element> children = _session.ActivePage.Root.Children;
-
-            if (_listedElements is null || !_listedElements.SequenceEqual(children))
-            {
-                _listedElements = [.. children];
-                _elementList.ItemsSource = _listedElements;
-            }
-
-            _elementList.SelectedItem =
-                _session.Canvas.Selection.Count == 1 ? _session.Canvas.Selection[0] : null;
-        }
-        finally
-        {
-            _suppressSelectionSync = false;
-        }
     }
 
     private bool _closeConfirmed;
@@ -1508,19 +892,6 @@ public sealed partial class MainWindow : Window, IDisposable
     // One per editor on screen, each pushing its element's current value back
     // into the control without rebuilding it.
     private readonly List<Action> _propertyValueRefreshers = [];
-
-    private void OnElementListSelectionChanged(object? sender, SelectionChangedEventArgs e)
-    {
-        if (_suppressSelectionSync)
-        {
-            return;
-        }
-
-        _session.Canvas.Select(_elementList.SelectedItem as Element);
-
-        RefreshProperties();
-        _canvas.InvalidateVisual();
-    }
 
     /// <summary>
     /// Reacts to a canvas gesture.
@@ -1569,11 +940,7 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    private void RefreshSelection()
-    {
-        RefreshElementList();
-        RefreshProperties();
-    }
+    private void RefreshSelection() => RefreshProperties();
 
     private void RefreshProperties()
     {
@@ -1835,7 +1202,7 @@ public sealed partial class MainWindow : Window, IDisposable
     /// They are built from the loaded client's hue table and fonts, so pointing
     /// at another installation would otherwise keep showing the previous one's.
     /// </remarks>
-    private void ForgetPickerEntries()
+    public void ForgetPickerEntries()
     {
         _hueEntries = null;
         _fontEntries = null;
@@ -2201,7 +1568,6 @@ public sealed partial class MainWindow : Window, IDisposable
         _session.MeasureActivePage();
 
         _canvas.InvalidateVisual();
-        RefreshElementList();
 
         // Switching an area between markup and a localised string changes
         // whether the browser has anything to write to.
@@ -2226,7 +1592,7 @@ public sealed partial class MainWindow : Window, IDisposable
             MenuItem item = new() { Header = converter.DisplayName + "…" };
 
             item.Click += async (_, _) =>
-                await GuardedAsync(() => ExportAsync(captured)).ConfigureAwait(true);
+                await GuardedAsync(() => _viewModel.ExportAsync(captured)).ConfigureAwait(true);
 
             items.Add(item);
         }
@@ -2270,7 +1636,7 @@ public sealed partial class MainWindow : Window, IDisposable
                     : page.Name,
             };
 
-            item.Click += (_, _) => Guarded(() => MoveSelectionToPage(target));
+            item.Click += (_, _) => Guarded(() => _viewModel.MoveSelectionToPage(target));
 
             targets.Add(item);
         }
@@ -2282,356 +1648,10 @@ public sealed partial class MainWindow : Window, IDisposable
         parent.IsEnabled = targets.Count > 0 && _session.Canvas.Selection.Count > 0;
     }
 
-    /// <summary>
-    /// Moves the selection to another page and follows it there.
-    /// </summary>
-    /// <remarks>
-    /// Following is deliberate. Pages other than 0 are mutually exclusive, so
-    /// moving an element to one while looking at another makes it vanish, which
-    /// reads exactly like a delete. Switching to the destination shows it arrive.
-    /// </remarks>
-    private void MoveSelectionToPage(int index)
-    {
-        int moved = _session.Canvas.MoveSelectionToPage(_session.Document.Pages[index]);
-
-        if (moved == 0)
-        {
-            SetStatus("Select something to move.");
-
-            return;
-        }
-
-        _session.ActivePageIndex = index;
-
-        RefreshAll();
-        SetStatus(moved == 1
-            ? string.Create(CultureInfo.InvariantCulture, $"Moved to page {index}.")
-            : string.Create(CultureInfo.InvariantCulture, $"Moved {moved} elements to page {index}."));
-    }
-
-    private async Task OpenAsync()
-    {
-        if (!await ConfirmDiscardAsync("opening another").ConfigureAwait(true))
-        {
-            return;
-        }
-
-        IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Open gump",
-            AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("GumpStudio document") { Patterns = ["*.gump"] }],
-        }).ConfigureAwait(true);
-
-        if (files.Count == 0)
-        {
-            return;
-        }
-
-        _session.Open(files[0].Path.LocalPath);
-        RefreshAll();
-    }
-
-    /// <summary>
-    /// Imports a 1.8 <c>.gump</c> or <c>.gumpling</c>.
-    /// </summary>
-    /// <remarks>
-    /// The two are not the same import: a gump replaces the document, while a
-    /// gumpling is a single group added to the page that is open. Only the
-    /// first discards anything, so only the first asks — and it asks after the
-    /// file has been chosen, so cancelling the picker costs no question.
-    /// </remarks>
-    private async Task ImportLegacyAsync()
-    {
-        IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Import a GumpStudio 1.8 file",
-            AllowMultiple = false,
-            FileTypeFilter =
-            [
-                new FilePickerFileType("GumpStudio 1.8") { Patterns = ["*.gump", "*.gumpling"] },
-            ],
-        }).ConfigureAwait(true);
-
-        if (files.Count == 0)
-        {
-            return;
-        }
-
-        string path = files[0].Path.LocalPath;
-
-        if (Path.GetExtension(path).Equals(".gumpling", StringComparison.OrdinalIgnoreCase))
-        {
-            GroupElement group = _session.ImportGumpling(path);
-
-            _session.Canvas.Select(group);
-            _session.MeasureActivePage();
-
-            RefreshAll();
-            SetStatus($"Added {group.Name} to page {_session.ActivePageIndex}.");
-
-            return;
-        }
-
-        if (!await ConfirmDiscardAsync("importing").ConfigureAwait(true))
-        {
-            return;
-        }
-
-        _session.ImportLegacy(path);
-        RefreshAll();
-
-        SetStatus("Imported. Save it to store the document in the current format.");
-    }
-
-    /// <summary>
-    /// Imports a gump from the layout text a capture tool produced.
-    /// </summary>
-    /// <remarks>
-    /// The dialog starts with the clipboard's contents when they look like a
-    /// layout, which is the case this exists for: someone has just copied a gump
-    /// out of a sniffer and wants to edit it.
-    /// </remarks>
-    private async Task ImportLayoutAsync()
-    {
-        if (!await ConfirmDiscardAsync("importing").ConfigureAwait(true))
-        {
-            return;
-        }
-
-        ImportLayoutWindow dialog = new();
-
-        await dialog.ShowDialog(this).ConfigureAwait(true);
-
-        if (dialog.Result is not { } document)
-        {
-            return;
-        }
-
-        _session.AdoptImported(document);
-        RefreshAll();
-
-        int elements = document.Pages.Sum(page => page.Leaves().Count());
-        string summary = string.Create(
-            CultureInfo.InvariantCulture,
-            $"Imported {elements} elements across {document.PageCount} pages.");
-
-        SetStatus(dialog.Warnings.Count == 0
-            ? summary + " Save it to keep the document."
-            : $"{summary} {dialog.Warnings.Count} line(s) were skipped — see the layout for what was lost.");
-    }
-
-    private async Task SaveAsync(string? path)
-    {
-        if (path is null)
-        {
-            IStorageFile? file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-            {
-                Title = "Save gump",
-                DefaultExtension = "gump",
-                SuggestedFileName = "gump.gump",
-            }).ConfigureAwait(true);
-
-            if (file is null)
-            {
-                return;
-            }
-
-            path = file.Path.LocalPath;
-        }
-
-        _session.Save(path);
-        RefreshAll();
-    }
-
-    /// <summary>
-    /// Picks a file, asks how to export, then writes it.
-    /// </summary>
-    /// <remarks>
-    /// The file comes first because the gump name defaults to its name. Asking
-    /// for the options first would leave nothing to derive that from, and would
-    /// quietly change the default name of every export.
-    /// </remarks>
-    private async Task ExportAsync(IGumpConverter converter)
-    {
-        IStorageFile? file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = $"Export as {converter.DisplayName}",
-            DefaultExtension = converter.FileExtension.TrimStart('.'),
-            SuggestedFileName = "gump" + converter.FileExtension,
-        }).ConfigureAwait(true);
-
-        if (file is null)
-        {
-            return;
-        }
-
-        AppSettings settings = _session.Settings;
-
-        GumpExportOptions defaults = new()
-        {
-            GumpName = Path.GetFileNameWithoutExtension(file.Name),
-            Dialect = settings.ExportDialectFor(converter.Id),
-        };
-
-        ExportOptionsWindow dialog = new(
-            $"Export as {converter.DisplayName}", converter.Dialects, defaults);
-
-        await dialog.ShowDialog(this).ConfigureAwait(true);
-
-        if (dialog.Result is not { } options)
-        {
-            return;
-        }
-
-        // Remembered per converter, so choosing the layout-string form once does
-        // not make it the default for every other target too.
-        settings.SetExportDialect(converter.Id, options.Dialect);
-        settings.Save();
-
-        string script = converter.Export(_session.Document, options);
-
-        await File.WriteAllTextAsync(file.Path.LocalPath, script).ConfigureAwait(true);
-
-        SetStatus($"Exported to {file.Name}.");
-    }
-
-    /// <summary>Prompts for a client folder when none is configured yet.</summary>
-    private async Task EnsureClientAsync()
-    {
-        string? remembered = _session.Settings.ClientPath;
-
-        if (remembered is not null)
-        {
-            SetStatus("Loading client art…");
-
-            IReadOnlyList<string> missing =
-                await _session.OpenClientAsync(remembered).ConfigureAwait(true);
-
-            if (missing.Count == 0)
-            {
-                ForgetPickerEntries();
-
-                RefreshAll();
-                StartClilocWarmup();
-
-                return;
-            }
-        }
-
-        await ChooseClientAsync(force: false).ConfigureAwait(true);
-    }
-
-    private async Task ChooseClientAsync(bool force)
-    {
-        if (!force)
-        {
-            SetStatus("No Ultima Online client configured — choose one to see art.");
-        }
-
-        IReadOnlyList<IStorageFolder> folders = await StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions
-            {
-                Title = "Select your Ultima Online folder",
-                AllowMultiple = false,
-            }).ConfigureAwait(true);
-
-        if (folders.Count == 0)
-        {
-            return;
-        }
-
-        string path = folders[0].Path.LocalPath;
-
-        SetStatus("Loading client art…");
-
-        IReadOnlyList<string> missing = await _session.OpenClientAsync(path).ConfigureAwait(true);
-
-        ForgetPickerEntries();
-
-        if (missing.Count > 0)
-        {
-            // Naming what is absent beats the original's crash inside a static
-            // constructor with no indication of the cause.
-            SetStatus($"That folder is missing: {string.Join(", ", missing)}", isError: true);
-
-            return;
-        }
-
-        _session.Settings.ClientPath = path;
-        _session.Settings.Save();
-
-        _session.MeasureActivePage();
-
-        RefreshAll();
-        StartClilocWarmup();
-    }
-
-    private void SetStatus(string message, bool isError = false)
-    {
-        _status.Text = message;
-        _status.Foreground = isError ? Brushes.IndianRed : Brushes.Silver;
-    }
-
-    /// <summary>
-    /// Asks before an action that would throw away unsaved work.
-    /// </summary>
-    /// <param name="action">
-    /// What is about to happen, as a gerund, for the question's wording.
-    /// </param>
-    /// <returns>False when the user chose to keep what they have.</returns>
-    /// <remarks>
-    /// Nothing asked before this existed: New, Open, both importers and Exit
-    /// all discarded the document silently.
-    /// </remarks>
-    private async Task<bool> ConfirmDiscardAsync(string action)
-    {
-        if (!_session.IsModified)
-        {
-            return true;
-        }
-
-        string name = _session.DocumentPath is { } path
-            ? Path.GetFileName(path)
-            : "This gump";
-
-        ConfirmWindow dialog = new(
-            $"{name} has unsaved changes. Discard them before {action}?");
-
-        await dialog.ShowDialog(this).ConfigureAwait(true);
-
-        return dialog.Confirmed;
-    }
-
-    private async Task NewAsync()
-    {
-        if (!await ConfirmDiscardAsync("starting a new one").ConfigureAwait(true))
-        {
-            return;
-        }
-
-        _session.NewDocument();
-    }
-
-    /// <summary>
-    /// Closes the window, asking first.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="OnClosing"/> asks as well, for the window's own close button.
-    /// This path cancels before <see cref="Window.Close()"/> is reached so the
-    /// close is never started, which keeps the two from asking twice.
-    /// </remarks>
-    private async Task CloseAsync()
-    {
-        if (!await ConfirmDiscardAsync("closing").ConfigureAwait(true))
-        {
-            return;
-        }
-
-        _closeConfirmed = true;
-
-        Close();
-    }
+    /// <summary>Forwards to the view model, which the status line binds to.</summary>
+    /// <remarks>Kept for the same reason as <see cref="Guarded"/>.</remarks>
+    private void SetStatus(string message, bool isError = false) =>
+        _viewModel.SetStatus(message, isError);
 
     /// <summary>
     /// Intercepts the window's own close button to ask about unsaved work.
@@ -2657,30 +1677,18 @@ public sealed partial class MainWindow : Window, IDisposable
         e.Cancel = true;
 
         _ = ConfirmAndCloseAsync();
-    }
 
-    private async Task ConfirmAndCloseAsync()
-    {
-        if (!await ConfirmDiscardAsync("closing").ConfigureAwait(true))
+        async Task ConfirmAndCloseAsync()
         {
-            return;
+            if (!await _viewModel.ConfirmDiscardAsync("closing").ConfigureAwait(true))
+            {
+                return;
+            }
+
+            _closeConfirmed = true;
+
+            Close();
         }
-
-        _closeConfirmed = true;
-
-        Close();
-    }
-
-    /// <summary>Shows the document name and whether it has unsaved changes.</summary>
-    private void RefreshTitle()
-    {
-        string name = _session.DocumentPath is { } path
-            ? Path.GetFileName(path)
-            : "Untitled";
-
-        Title = _session.IsModified
-            ? $"GumpStudio — {name}*"
-            : $"GumpStudio — {name}";
     }
 
     protected override void OnClosed(EventArgs e)
