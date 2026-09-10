@@ -192,7 +192,16 @@ public sealed class EditorSession : IDisposable
         }
     }
 
-    public GumpPage ActivePage => _document.Pages[_activePageIndex];
+    /// <summary>The page being edited.</summary>
+    /// <remarks>
+    /// Clamped rather than indexed directly. Removing a page is two steps - the
+    /// command takes it out of the document, and the caller then corrects
+    /// <see cref="ActivePageIndex"/> - and anything listening to the undo history
+    /// runs in between, when the index still points past the end. The setter has
+    /// always clamped; this makes the pair agree.
+    /// </remarks>
+    public GumpPage ActivePage =>
+        _document.Pages[Math.Clamp(_activePageIndex, 0, _document.PageCount - 1)];
 
     public event EventHandler? DocumentChanged;
 

@@ -1,73 +1,127 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:GumpStudio.App.ViewModels"
         x:Class="GumpStudio.App.MainWindow"
-        Title="GumpStudio"
+        x:DataType="vm:MainViewModel"
+        Title="{Binding Title}"
         Icon="/Assets/gumpstudio.ico"
         Width="1280" Height="860"
         MinWidth="900" MinHeight="600">
+
+  <!--
+    The status line's two colours. A style rather than an assignment, so that
+    nothing outside the view decides what a failure looks like - the view model
+    reports only whether the message is one.
+  -->
+  <Window.Styles>
+    <Style Selector="TextBlock#StatusText">
+      <Setter Property="Foreground" Value="Silver" />
+    </Style>
+    <Style Selector="TextBlock#StatusText.error">
+      <Setter Property="Foreground" Value="IndianRed" />
+    </Style>
+  </Window.Styles>
 
   <DockPanel>
 
     <Menu DockPanel.Dock="Top" Name="MainMenu">
       <MenuItem Header="_File">
-        <MenuItem Header="_New" Name="MenuNew" InputGesture="Ctrl+N" />
-        <MenuItem Header="_Open…" Name="MenuOpen" InputGesture="Ctrl+O" />
-        <MenuItem Header="_Save" Name="MenuSave" InputGesture="Ctrl+S" />
-        <MenuItem Header="Save _As…" Name="MenuSaveAs" />
+        <MenuItem Header="_New" Name="MenuNew" Command="{Binding NewCommand}"
+                  InputGesture="Ctrl+N" />
+        <MenuItem Header="_Open…" Name="MenuOpen" Command="{Binding OpenCommand}"
+                  InputGesture="Ctrl+O" />
+        <MenuItem Header="_Save" Name="MenuSave" Command="{Binding SaveCommand}"
+                  InputGesture="Ctrl+S" />
+        <MenuItem Header="Save _As…" Name="MenuSaveAs" Command="{Binding SaveAsCommand}" />
         <Separator />
-        <MenuItem Header="_Import GumpStudio 1.8 file…" Name="MenuImportLegacy" />
-        <MenuItem Header="Import gump _layout…" Name="MenuImportLayout" />
+        <MenuItem Header="_Import GumpStudio 1.8 file…" Name="MenuImportLegacy"
+                  Command="{Binding ImportLegacyCommand}" />
+        <MenuItem Header="Import gump _layout…" Name="MenuImportLayout"
+                  Command="{Binding ImportLayoutCommand}" />
         <MenuItem Header="_Export" Name="MenuExport" />
         <Separator />
-        <MenuItem Header="Set _client folder…" Name="MenuSetClient" />
+        <MenuItem Header="Set _client folder…" Name="MenuSetClient"
+                  Command="{Binding SetClientCommand}" />
         <Separator />
-        <MenuItem Header="E_xit" Name="MenuExit" />
+        <MenuItem Header="E_xit" Name="MenuExit" Command="{Binding ExitCommand}" />
       </MenuItem>
 
       <MenuItem Header="_Edit" Name="MenuEditRoot">
-        <MenuItem Header="_Undo" Name="MenuUndo" InputGesture="Ctrl+Z" />
-        <MenuItem Header="_Redo" Name="MenuRedo" InputGesture="Ctrl+Y" />
+        <MenuItem Header="{Binding UndoHeader}" Name="MenuUndo" Command="{Binding UndoCommand}"
+                  InputGesture="Ctrl+Z" IsEnabled="{Binding CanUndo}" />
+        <MenuItem Header="{Binding RedoHeader}" Name="MenuRedo" Command="{Binding RedoCommand}"
+                  InputGesture="Ctrl+Y" IsEnabled="{Binding CanRedo}" />
         <Separator />
-        <MenuItem Header="Cu_t" Name="MenuCut" InputGesture="Ctrl+X" />
-        <MenuItem Header="_Copy" Name="MenuCopy" InputGesture="Ctrl+C" />
-        <MenuItem Header="_Paste" Name="MenuPaste" InputGesture="Ctrl+V" />
+        <MenuItem Header="Cu_t" Name="MenuCut" Command="{Binding CutCommand}"
+                  InputGesture="Ctrl+X" IsEnabled="{Binding CanCut}" />
+        <MenuItem Header="_Copy" Name="MenuCopy" Command="{Binding CopyCommand}"
+                  InputGesture="Ctrl+C" IsEnabled="{Binding CanCopy}" />
+        <MenuItem Header="_Paste" Name="MenuPaste" Command="{Binding PasteCommand}"
+                  InputGesture="Ctrl+V" />
         <Separator />
-        <MenuItem Header="Select _all" Name="MenuSelectAll" InputGesture="Ctrl+A" />
-        <MenuItem Header="_Delete" Name="MenuDelete" InputGesture="Delete" />
-        <MenuItem Header="_Group selection" Name="MenuGroup" InputGesture="Ctrl+G" />
-        <MenuItem Header="_Ungroup" Name="MenuUngroup" InputGesture="Ctrl+Shift+G" />
+        <MenuItem Header="Select _all" Name="MenuSelectAll" Command="{Binding SelectAllCommand}"
+                  InputGesture="Ctrl+A" />
+        <MenuItem Header="_Delete" Name="MenuDelete" Command="{Binding DeleteCommand}"
+                  InputGesture="Delete" IsEnabled="{Binding CanDelete}" />
+        <MenuItem Header="_Group selection" Name="MenuGroup" Command="{Binding GroupCommand}"
+                  InputGesture="Ctrl+G" IsEnabled="{Binding CanGroup}" />
+        <MenuItem Header="_Ungroup" Name="MenuUngroup" Command="{Binding UngroupCommand}"
+                  InputGesture="Ctrl+Shift+G" IsEnabled="{Binding CanUngroup}" />
         <Separator />
-        <MenuItem Header="Bring to _front" Name="MenuBringToFront" InputGesture="Ctrl+Shift+Up" />
-        <MenuItem Header="Bring for_ward" Name="MenuBringForward" InputGesture="Ctrl+Up" />
-        <MenuItem Header="Send back_ward" Name="MenuSendBackward" InputGesture="Ctrl+Down" />
-        <MenuItem Header="Send to _back" Name="MenuSendToBack" InputGesture="Ctrl+Shift+Down" />
+        <MenuItem Header="Bring to _front" Name="MenuBringToFront"
+                  Command="{Binding BringToFrontCommand}" InputGesture="Ctrl+Shift+Up"
+                  IsEnabled="{Binding CanReorder}" />
+        <MenuItem Header="Bring for_ward" Name="MenuBringForward"
+                  Command="{Binding BringForwardCommand}" InputGesture="Ctrl+Up"
+                  IsEnabled="{Binding CanReorder}" />
+        <MenuItem Header="Send back_ward" Name="MenuSendBackward"
+                  Command="{Binding SendBackwardCommand}" InputGesture="Ctrl+Down"
+                  IsEnabled="{Binding CanReorder}" />
+        <MenuItem Header="Send to _back" Name="MenuSendToBack"
+                  Command="{Binding SendToBackCommand}" InputGesture="Ctrl+Shift+Down"
+                  IsEnabled="{Binding CanReorder}" />
         <Separator />
-        <MenuItem Header="_Arrange" Name="MenuArrange">
-          <MenuItem Header="Align _lefts" Name="MenuAlignLeft" />
-          <MenuItem Header="Align _rights" Name="MenuAlignRight" />
-          <MenuItem Header="Align _tops" Name="MenuAlignTop" />
-          <MenuItem Header="Align _bottoms" Name="MenuAlignBottom" />
+        <MenuItem Header="_Arrange" Name="MenuArrange" IsEnabled="{Binding CanArrange}">
+          <MenuItem Header="Align _lefts" Name="MenuAlignLeft"
+                    Command="{Binding AlignLeftCommand}" />
+          <MenuItem Header="Align _rights" Name="MenuAlignRight"
+                    Command="{Binding AlignRightCommand}" />
+          <MenuItem Header="Align _tops" Name="MenuAlignTop" Command="{Binding AlignTopCommand}"
+                    />
+          <MenuItem Header="Align _bottoms" Name="MenuAlignBottom"
+                    Command="{Binding AlignBottomCommand}" />
           <Separator />
-          <MenuItem Header="Centre _horizontally" Name="MenuCentreH" />
-          <MenuItem Header="Centre _vertically" Name="MenuCentreV" />
+          <MenuItem Header="Centre _horizontally" Name="MenuCentreH"
+                    Command="{Binding CentreHorizontallyCommand}" />
+          <MenuItem Header="Centre _vertically" Name="MenuCentreV"
+                    Command="{Binding CentreVerticallyCommand}" />
           <Separator />
-          <MenuItem Header="Equalise horizontal _spacing" Name="MenuSpaceH" />
-          <MenuItem Header="Equalise vertical spa_cing" Name="MenuSpaceV" />
+          <MenuItem Header="Equalise horizontal _spacing" Name="MenuSpaceH"
+                    Command="{Binding SpaceHorizontallyCommand}" />
+          <MenuItem Header="Equalise vertical spa_cing" Name="MenuSpaceV"
+                    Command="{Binding SpaceVerticallyCommand}" />
         </MenuItem>
       </MenuItem>
 
       <MenuItem Header="_View">
         <MenuItem Header="Show page _0 beneath this page" Name="MenuShowPage0"
-                  ToggleType="CheckBox" IsChecked="True" />
+                  IsChecked="{Binding ShowSharedPage, Mode=TwoWay}" ToggleType="CheckBox" />
         <Separator />
-        <MenuItem Header="Show _grid" Name="MenuShowGrid" ToggleType="CheckBox" />
-        <MenuItem Header="_Snap to grid" Name="MenuSnapToGrid" ToggleType="CheckBox" />
-        <MenuItem Header="Grid _size…" Name="MenuGridSize" />
+        <MenuItem Header="Show _grid" Name="MenuShowGrid"
+                  IsChecked="{Binding ShowGrid, Mode=TwoWay}" ToggleType="CheckBox" />
+        <MenuItem Header="_Snap to grid" Name="MenuSnapToGrid"
+                  IsChecked="{Binding SnapToGrid, Mode=TwoWay}" ToggleType="CheckBox" />
+        <MenuItem Header="Grid _size…" Name="MenuGridSize"
+                  Command="{Binding ChooseGridSizeCommand}" />
         <Separator />
-        <MenuItem Header="Zoom _in" Name="MenuZoomIn" InputGesture="Ctrl+OemPlus" />
-        <MenuItem Header="Zoom _out" Name="MenuZoomOut" InputGesture="Ctrl+OemMinus" />
-        <MenuItem Header="_Actual size" Name="MenuZoomReset" InputGesture="Ctrl+D0" />
-        <MenuItem Header="_Fit to window" Name="MenuZoomFit" />
+        <MenuItem Header="Zoom _in" Name="MenuZoomIn" Command="{Binding ZoomInCommand}"
+                  InputGesture="Ctrl+OemPlus" />
+        <MenuItem Header="Zoom _out" Name="MenuZoomOut" Command="{Binding ZoomOutCommand}"
+                  InputGesture="Ctrl+OemMinus" />
+        <MenuItem Header="_Actual size" Name="MenuZoomReset"
+                  Command="{Binding ZoomResetCommand}" InputGesture="Ctrl+D0" />
+        <MenuItem Header="_Fit to window" Name="MenuZoomFit"
+                  Command="{Binding ZoomToFitCommand}" />
         <Separator />
         <!--
           Hiding and showing a panel lives here rather than on the tab's close
@@ -76,38 +130,45 @@
           RestoreDockable to find.
         -->
         <MenuItem Header="_Toolbox panel" Name="MenuPanelToolbox"
-                  ToggleType="CheckBox" IsChecked="True" />
+                  IsChecked="{Binding ToolboxVisible, Mode=TwoWay}" ToggleType="CheckBox" />
         <MenuItem Header="_Elements panel" Name="MenuPanelElements"
-                  ToggleType="CheckBox" IsChecked="True" />
+                  IsChecked="{Binding ElementsVisible, Mode=TwoWay}" ToggleType="CheckBox" />
         <MenuItem Header="_Properties panel" Name="MenuPanelProperties"
-                  ToggleType="CheckBox" IsChecked="True" />
+                  IsChecked="{Binding PropertiesVisible, Mode=TwoWay}" ToggleType="CheckBox" />
         <MenuItem Header="_Cliloc panel" Name="MenuPanelCliloc"
-                  ToggleType="CheckBox" IsChecked="True" />
+                  IsChecked="{Binding ClilocVisible, Mode=TwoWay}" ToggleType="CheckBox" />
         <Separator />
-        <MenuItem Header="_Reset panel layout" Name="MenuResetLayout" />
+        <MenuItem Header="_Reset panel layout" Name="MenuResetLayout"
+                  Command="{Binding ResetLayoutCommand}" />
       </MenuItem>
 
       <MenuItem Header="_Gump">
-        <MenuItem Header="_Properties…" Name="MenuGumpProperties" />
+        <MenuItem Header="_Properties…" Name="MenuGumpProperties"
+                  Command="{Binding EditGumpPropertiesCommand}" />
       </MenuItem>
 
       <MenuItem Header="_Page" Name="MenuPageRoot">
-        <MenuItem Header="_Add page" Name="MenuAddPage" />
-        <MenuItem Header="_Insert page here" Name="MenuInsertPage" />
-        <MenuItem Header="_Remove page" Name="MenuRemovePage" />
-        <MenuItem Header="_Clear page" Name="MenuClearPage" />
+        <MenuItem Header="_Add page" Name="MenuAddPage" Command="{Binding AddPageCommand}" />
+        <MenuItem Header="_Insert page here" Name="MenuInsertPage"
+                  Command="{Binding InsertPageCommand}" />
+        <MenuItem Header="_Remove page" Name="MenuRemovePage"
+                  Command="{Binding RemovePageCommand}" />
+        <MenuItem Header="_Clear page" Name="MenuClearPage" Command="{Binding ClearPageCommand}"
+                  />
         <Separator />
         <MenuItem Header="_Move selection to page" Name="MenuMoveToPage" />
       </MenuItem>
 
       <MenuItem Header="_Help">
-        <MenuItem Header="_About GumpStudio…" Name="MenuAbout" />
+        <MenuItem Header="_About GumpStudio…" Name="MenuAbout"
+                  Command="{Binding ShowAboutCommand}" />
       </MenuItem>
 
     </Menu>
 
     <Border DockPanel.Dock="Bottom" Background="#1F1F23" Padding="8,4">
-      <TextBlock Name="StatusText" Foreground="#C8C8C8" Text="Ready." />
+      <TextBlock Name="StatusText" Text="{Binding Status}"
+                 Classes.error="{Binding IsStatusError}" />
     </Border>
 
     <!--

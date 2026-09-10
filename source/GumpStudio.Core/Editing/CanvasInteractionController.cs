@@ -793,14 +793,32 @@ public sealed class CanvasInteractionController(UndoHistory history)
     }
 
     /// <summary>Empties the selection.</summary>
+    /// <remarks>
+    /// Announces the change, which it did not always do. Emptying the selection
+    /// is as much a change as making one, but this was silent - so deleting the
+    /// selection, switching page and clearing it outright all left anything
+    /// watching <see cref="Changed"/> believing the old selection stood. The
+    /// editor did not notice because the window rebuilt itself after every edit
+    /// regardless; a menu item that binds its enabled state does notice.
+    ///
+    /// Guarded on there being something to clear, so the callers that clear and
+    /// then rebuild a selection still report one change rather than two.
+    /// </remarks>
     public void ClearSelection()
     {
+        if (_selection.Count == 0)
+        {
+            return;
+        }
+
         foreach (Element element in _selection)
         {
             element.IsSelected = false;
         }
 
         _selection.Clear();
+
+        OnChanged();
     }
 
     private void SelectWithin(GumpRect area)

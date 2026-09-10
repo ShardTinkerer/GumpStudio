@@ -126,12 +126,23 @@ public abstract class Element : INotifyPropertyChanged
         set => Set(ref _itemPropertySerial, value);
     }
 
+    private bool _isSelected;
+
     /// <summary>The group this element belongs to, or null for a page root.</summary>
     public GroupElement? Parent { get; internal set; }
 
     /// <summary>True when the element is part of the current selection.</summary>
-    /// <remarks>Editor state, not saved.</remarks>
-    public bool IsSelected { get; set; }
+    /// <remarks>
+    /// Editor state, not saved - but notifying all the same, so a list can bind
+    /// its own selection to it rather than being reassigned and re-synchronised
+    /// whenever anything changes. Not editor-only in practice either:
+    /// <c>GumpRenderer</c> reads it to draw the handles.
+    /// </remarks>
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => Set(ref _isSelected, value);
+    }
 
     public int X => Location.X;
 

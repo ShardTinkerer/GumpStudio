@@ -1,0 +1,79 @@
+<ContextMenu xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:GumpStudio.App.ViewModels"
+             x:Class="GumpStudio.App.Controls.EditorContextMenu"
+             x:DataType="vm:MainViewModel">
+
+  <!--
+    The same commands the menu bar binds, so the two cannot disagree about what
+    is available. The original had no context menu on the design surface at all:
+    every action meant a trip to the menu bar. What replaced it built the whole
+    tree in code and re-enabled each item in an Opening handler, duplicating
+    every rule in RefreshEditMenu - and the two drifted apart, which is the
+    defect this markup exists to make impossible.
+
+    Items are never disabled by hiding: a greyed entry still shows what is
+    possible and where to find it.
+  -->
+
+  <MenuItem Header="{Binding UndoContextHeader}" Command="{Binding UndoCommand}"
+            IsEnabled="{Binding CanUndo}" />
+  <MenuItem Header="{Binding RedoContextHeader}" Command="{Binding RedoCommand}"
+            IsEnabled="{Binding CanRedo}" />
+
+  <Separator />
+
+  <MenuItem Header="Group selection" Command="{Binding GroupCommand}"
+            IsEnabled="{Binding CanGroup}" />
+  <MenuItem Header="Ungroup" Command="{Binding UngroupCommand}"
+            IsEnabled="{Binding CanUngroup}" />
+
+  <Separator />
+
+  <MenuItem Header="Bring to front" Command="{Binding BringToFrontCommand}"
+            IsEnabled="{Binding CanReorder}" />
+  <MenuItem Header="Bring forward" Command="{Binding BringForwardCommand}"
+            IsEnabled="{Binding CanReorder}" />
+  <MenuItem Header="Send backward" Command="{Binding SendBackwardCommand}"
+            IsEnabled="{Binding CanReorder}" />
+  <MenuItem Header="Send to back" Command="{Binding SendToBackCommand}"
+            IsEnabled="{Binding CanReorder}" />
+
+  <Separator />
+
+  <MenuItem Header="Cut" Command="{Binding CutCommand}" IsEnabled="{Binding CanCut}" />
+  <MenuItem Header="Copy" Command="{Binding CopyCommand}" IsEnabled="{Binding CanCopy}" />
+  <MenuItem Header="Paste" Command="{Binding PasteCommand}" />
+
+  <Separator />
+
+  <!--
+    Arrange carries its own enabled state rather than leaving it to its
+    children: a disabled item never opens its own submenu, so nothing inside
+    would ever be asked.
+  -->
+  <MenuItem Header="Arrange" IsEnabled="{Binding CanArrange}">
+    <MenuItem Header="Align lefts" Command="{Binding AlignLeftCommand}" />
+    <MenuItem Header="Align rights" Command="{Binding AlignRightCommand}" />
+    <MenuItem Header="Align tops" Command="{Binding AlignTopCommand}" />
+    <MenuItem Header="Align bottoms" Command="{Binding AlignBottomCommand}" />
+    <Separator />
+    <MenuItem Header="Centre horizontally" Command="{Binding CentreHorizontallyCommand}" />
+    <MenuItem Header="Centre vertically" Command="{Binding CentreVerticallyCommand}" />
+    <Separator />
+    <MenuItem Header="Equalise horizontal spacing" Command="{Binding SpaceHorizontallyCommand}" />
+    <MenuItem Header="Equalise vertical spacing" Command="{Binding SpaceVerticallyCommand}" />
+  </MenuItem>
+
+  <MenuItem Header="Move to page" Name="MoveToPage" />
+
+  <Separator />
+
+  <MenuItem Header="Delete" Command="{Binding DeleteCommand}" IsEnabled="{Binding CanDelete}" />
+
+  <Separator />
+
+  <MenuItem Header="Select all" Command="{Binding SelectAllCommand}" />
+  <MenuItem Header="Gump properties…" Command="{Binding EditGumpPropertiesCommand}" />
+
+</ContextMenu>

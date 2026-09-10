@@ -174,6 +174,3 @@ public static class PickerEntries
         return SkiaBitmap.ToAvalonia(decoded);
     }
 }
-
-/// <summary>A font face, as a picker chooses it.</summary>
-public readonly record struct FontChoice(GumpFontFamily Family, int Index);
